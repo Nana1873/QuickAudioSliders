@@ -7,12 +7,9 @@ Claude-specific deltas; do not duplicate AGENTS.md content here.
 
 ## Claude-specific deltas
 
-- Branch prefix is `claude/` (`claude/<issue#>-<slug>`), not `codex/`.
-- Use the `gh` CLI for all GitHub operations (issues, labels, PRs, checks).
+- Local-only workspace: no GitHub remote, no `gh`, commit straight to `main`.
 - Shell is PowerShell.
 - For parallel sessions use the worktree convention in AGENTS.md. Worktrees
   go to `E:\DevProjects\MO2 Dev Setup\worktrees\`, never into `workspaces\`.
-- Slash commands: `/next-issue` claims the next ready issue and sets up the
-  worktree; `/finish-issue` verifies, pushes, and opens the PR.
 - Hard rule (echo of AGENTS.md "Git Safety"): never commit `.pex`, `.esp`,
   `vendor/`, or any third-party payload.

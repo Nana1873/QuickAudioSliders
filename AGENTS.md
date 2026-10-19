@@ -10,7 +10,7 @@ working on this project.
 - **Shared lab root**: `E:/DevProjects/MO2 Dev Setup/`
 - **Canonical MO2 runtime**: `E:/Modlisten/SkyrimAE/`
 - **MO2 profile**: `E:/Modlisten/SkyrimAE/profiles/Default/`
-- **MO2 dev mod target**: `E:/Modlisten/SkyrimAE/mods/Quick Audio Sliders Dev/`
+- **MO2 dev mod target**: `E:/Modlisten/SkyrimAE/mods/houseCARL - Quick Audio Sliders Dev/ (created by housecarl_place)`
 - **Runtime logs**: `D:/Dokumente/My Games/Skyrim Special Edition/SKSE/` and `D:/Dokumente/My Games/Skyrim Special Edition/Logs/Script/`
 
 Use this workspace for source, tests, docs, and build/deploy scripts. Use the
@@ -48,56 +48,31 @@ respect existing listener/process/project locks. Stop the MCP session before
 opening or rebuilding that same project. An inspection request does not call
 for `python run.py`, a new import, or a Ghidra/LLVM download.
 
-## GitHub Coordination
+## Local-only Coordination
 
-<!-- Remove this whole section if this workspace stays local-only. -->
+This workspace is deliberately local-only (no GitHub remote). Coordinate
+through commits on `main` and short notes in `docs/`. Keep `build/` and the
+deployed DLL out of git. If the mod is ever published, re-run the GitHub block
+from `tools/shared-scripts/new-workspace.ps1` at the lab root.
 
-Multiple agents (Claude Code, Codex) work on this repo in parallel. GitHub is
-the coordination layer: Issues are the task queue, PRs are the only way into
-`main`. CI only runs a light `pr-hygiene` check; real verification stays
-local.
+## Build
 
-### Task queue
+Native SKSE plugin (CommonLibSSE-NG, `extern/commonlibsse-ng` submodule, SKSE
+Menu Framework header under `external/skse-menu-framework`). Build with
 
-- Only start coding against an open issue labeled `status:ready`. Exception:
-  trivial fixes (a few lines) may go straight to a PR labeled `no-issue`.
-- Issue labels: `status:ready`, `status:in-progress`, `status:blocked`, plus
-  one `type:*` label. An open PR referencing the issue is the review state.
-- New tasks use the "Agent task" issue template
-  (`.github/ISSUE_TEMPLATE/agent_task.yml`).
+```powershell
+.	oolsuild.ps1
+```
 
-### Claim protocol
+which wraps `VsDevCmd.bat` + `cmake --preset release` + `cmake --build`. The
+first configure compiles CommonLib from source (~15 min); later builds are
+seconds. Output: `build/release/QuickAudioSliders.dll` (+ `.pdb`).
+In a fresh clone run `git submodule update --init --recursive` first.
 
-All agents act as the same GitHub user, so the assignee field cannot prevent
-collisions. Labels plus a claim comment are the lock:
-
-1. `gh issue list --label "status:ready" --state open`
-2. Read the issue comments. If a claim comment exists and the issue is
-   `status:in-progress`, pick another issue.
-3. Claim it:
-   `gh issue edit <N> --remove-label "status:ready" --add-label "status:in-progress"`
-   then comment `Claimed by <claude|codex>, branch <prefix>/<N>-<slug>`.
-4. If you abandon the issue, swap the labels back and comment why.
-
-### Branches and PRs
-
-- Branch names: `codex/<issue#>-<slug>` (Codex) or `claude/<issue#>-<slug>`
-  (Claude Code), always cut from fresh `main`. Never commit to `main`
-  directly.
-- One issue = one branch = one PR against `main`.
-- The PR body must contain `Closes #<issue>` and the filled checklist from
-  `.github/PULL_REQUEST_TEMPLATE.md`.
-
-### Parallel sessions (git worktrees)
-
-- One worktree per issue/branch. Worktrees live at the lab root:
-  `E:\DevProjects\MO2 Dev Setup\worktrees\<repo-slug>-<slug>`. Never create
-  worktrees inside `workspaces\`.
-- Create: `git worktree add "..\..\worktrees\<repo-slug>-<slug>" -b <prefix>/<N>-<slug> main`
-- Remove after merge: `git worktree remove "..\..\worktrees\<repo-slug>-<slug>"`,
-  then `git worktree prune`.
-- **Runtime deploy is a mutex**: only one session may deploy to MO2 or launch
-  Skyrim at a time, across all workspaces (lab AGENTS.md "Runtime mutex").
+Dev deployment target is the MO2 mod folder named in Boundaries; place the DLL
+as `SKSE/Plugins/QuickAudioSliders.dll` (via houseCARL `housecarl_place` or
+the lab helpers), then enable the mod in MO2. A running game keeps the PDB
+open, so quit Skyrim before relinking.
 
 ## Git Safety
 
