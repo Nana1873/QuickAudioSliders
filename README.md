@@ -11,7 +11,7 @@ their sounds through vanilla categories and have no slider of their own
 (runtime-only categories, save-neutral). No more Escape → Settings → Audio.
 
 - Changes apply live through `BSISoundCategory::SetCategoryVolume` plus the
-  engine's VolumeChanged broadcast, the same path the Vanilla slider uses —
+  engine's VolumeChanged broadcast, the same path the Vanilla slider uses;
   sounds already playing follow immediately. No INI reload tricks.
 - An "All Sounds (global)" slider on top scales every root sound category (menu-visible or not); saved in the plugin INI and applied on startup. The Vanilla master is left to the Vanilla menu (with a one-time stuck-at-0 repair).
 - Mods contributing a single slider are pooled into an "Other Mods" group with a mod-name prefix.
@@ -33,7 +33,7 @@ their sounds through vanilla categories and have no slider of their own
 ## Requirements
 
 - Skyrim SE 1.5.97 or AE 1.6.x incl. 1.6.1170 (Address Library build, one DLL;
-  the build also carries CommonLibSSE-NG's AE 1.7.x support — untested, as is VR)
+  the build also carries CommonLibSSE-NG's AE 1.7.x support, untested, as is VR)
 - SKSE64, Address Library for SKSE Plugins
 - SKSE Menu Framework 3.x (soft dependency: without it the plugin loads but
   shows nothing)
@@ -110,6 +110,8 @@ built DLL (`SKSE/Plugins/`, no `.pdb`) and the translation files
 
 ## License
 
-MIT (see `LICENSE`). Third-party: CommonLibSSE-NG (MIT), SKSE Menu Framework
-consumer header by Thiago Kaique / QTR-Modding (MIT); the in-game UI is drawn
-by SKSE Menu Framework, which embeds Dear ImGui (MIT).
+GPL-3.0 (see `LICENSE`). Third-party: CommonLibSSE-NG is GPL-3.0-or-later
+with modding exceptions (see its `COPYING.txt` and `EXCEPTIONS.md`; originally
+MIT); the SKSE Menu Framework consumer header by Thiago Kaique / QTR-Modding
+is MIT; the in-game UI is drawn by SKSE Menu Framework, which embeds Dear
+ImGui (MIT). Release downloads are published only on Nexus Mods.
