@@ -462,6 +462,13 @@ this plugin creates. Page names are registered at kPostLoad, before any
 translation table exists, so they stay English; the page hint is translated
 ("Regler, die dieses Plugin für Mods erzeugt …").
 
+## Rename: page 2 "Auto Sliders" -> "Extra Sliders" (2026-10-20)
+
+"Auto" described the implementation (the plugin creates the categories
+itself), "Extra" describes the benefit (additional sliders that would not
+exist otherwise). Page names are still registered at kPostLoad and stay
+English; no `$QAS_*` string mentioned the old name.
+
 ## Build 22: self-documenting INI (2026-10-20)
 
 `QuickAudioSliders.ini` now documents itself. A template in `AudioSliders.cpp`

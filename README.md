@@ -83,14 +83,14 @@ Key = `<plugin file>|<local FormID>` (the log lists every category with its
 key at startup). ALL-CAPS names are shown in title case and a mod's own
 prefix ("AOS_") is dropped inside that mod's group automatically.
 
-## Per-mod sliders for mods without their own category (page "Auto Sliders")
+## Per-mod sliders for mods without their own category (page "Extra Sliders")
 
 Many sound mods route their sounds through Vanilla categories (Effects,
 Ambience). By default the plugin creates, at startup and only in memory, one
 sound category per such mod (at least `MinSounds` descriptors, default 3) and
-shows it on the "Auto Sliders" page. Nothing is written to disk or to save games;
+shows it on the "Extra Sliders" page. Nothing is written to disk or to save games;
 engine-managed categories and Sound Record Distributor assignments are left
 alone, and mods that already have a slider on the Volume page are not
 duplicated. Opt out with `[ModCategories] Enabled=0` in
-`QuickAudioSliders.ini` (the "Auto Sliders" page then disappears after a restart),
+`QuickAudioSliders.ini` (the "Extra Sliders" page then disappears after a restart),
 or keep single mods off the page with `Exclude=Some Mod.esp,Other.esp`.

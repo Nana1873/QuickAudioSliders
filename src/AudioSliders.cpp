@@ -597,7 +597,7 @@ namespace
 
     constexpr IniTemplateKey kModCategoriesKeys[] = {
         { std::string_view{ QAS::Ini::kModCategoriesEnabledKey },
-            "; Enabled: 1 = create the runtime per-mod categories and the \"Auto Sliders\"\n"
+            "; Enabled: 1 = create the runtime per-mod categories and the \"Extra Sliders\"\n"
             "; page (default), 0 = turn both off. Takes effect on the next game start.\n"
             "Enabled=1"sv },
         { "MinSounds"sv,
@@ -613,7 +613,7 @@ namespace
     constexpr IniTemplateSection kIniTemplate[] = {
         { std::string_view{ QAS::Ini::kModCategoriesSection },
             "[ModCategories]\n"
-            "; Runtime per-mod sliders (page \"Auto Sliders\") for mods whose sounds only\n"
+            "; Runtime per-mod sliders (page \"Extra Sliders\") for mods whose sounds only\n"
             "; run through Vanilla sound categories (Effects, Ambience, ...). The plugin\n"
             "; creates one in-memory sound category per mod at startup; nothing is written\n"
             "; to disk or into save games, and mods that already own a menu slider are\n"

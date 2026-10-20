@@ -102,7 +102,7 @@ namespace
         return drawn;
     }
 
-    // Page "Auto Sliders": runtime categories created by [ModCategories].
+    // Page "Extra Sliders": runtime categories created by [ModCategories].
     void __stdcall RenderMods()
     {
         const auto& strings = QAS::Translation::S();
@@ -183,12 +183,12 @@ namespace QAS::MenuIntegration
         SKSEMenuFramework::AddSectionItem("Volume", RenderVolume);
         // Page names are registered here at kPostLoad, before any translation
         // table exists, so they stay English: "Volume" = the regular menu
-        // sliders, "Auto Sliders" = the categories this plugin creates.
-        const bool autoPage = ModCategoriesEnabled();
-        if (autoPage) {
-            SKSEMenuFramework::AddSectionItem("Auto Sliders", RenderMods);
+        // sliders, "Extra Sliders" = the categories this plugin creates.
+        const bool extraPage = ModCategoriesEnabled();
+        if (extraPage) {
+            SKSEMenuFramework::AddSectionItem("Extra Sliders", RenderMods);
         }
         logs::info("Registered SKSE Menu Framework section '{}' (framework v{}), pages: Volume{}", kSectionName,
-            version, autoPage ? ", Auto Sliders" : "");
+            version, extraPage ? ", Extra Sliders" : "");
     }
 }
