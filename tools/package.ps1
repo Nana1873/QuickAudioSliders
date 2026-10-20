@@ -28,6 +28,7 @@ New-Item -ItemType Directory -Force -Path (Join-Path $stage 'Interface\Translati
 Copy-Item $dll (Join-Path $stage 'SKSE\Plugins\QuickAudioSliders.dll')
 Copy-Item (Join-Path $translations 'QuickAudioSliders_ENGLISH.txt') (Join-Path $stage 'Interface\Translations\')
 Copy-Item (Join-Path $translations 'QuickAudioSliders_GERMAN.txt') (Join-Path $stage 'Interface\Translations\')
+Copy-Item (Join-Path $root 'LICENSE') (Join-Path $stage 'QuickAudioSliders-LICENSE.txt')
 
 $archive = Join-Path $dist "QuickAudioSliders-$version.zip"
 if (Test-Path $archive) { Remove-Item $archive -Force }
