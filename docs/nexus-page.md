@@ -65,9 +65,6 @@ Everything lives in `Data/SKSE/Plugins/QuickAudioSliders.ini`, created on first 
 **Why does the global slider start below 100%?**
 It remembers its last value across sessions (stored in the plugin INI). If you lowered it last time, you start quiet. The slider sits at the top of the panel and shows the current value, so nothing is hidden. Set it back to 100% (or use Reset All) and the plugin hands control back to the game.
 
-**My game was completely silent before I even installed this. Can it fix that?**
-One known cause, yes: a vanilla master volume stuck at 0 in `SkyrimPrefs.ini`. The plugin repairs that once at startup (restores the vanilla master to 100%), and "Reset All" restores it too. If you deliberately set the vanilla master to 0 afterwards, the plugin leaves it alone.
-
 **The intro video (Bethesda logo) is still loud!**
 Known limitation: the Bink intro video plays before any mod code runs and outside the game's sound-category system, so no SKSE plugin can touch its volume. Use `sIntroSequence=` in `Skyrim.ini` to skip it, or lower your system volume for startup.
 
