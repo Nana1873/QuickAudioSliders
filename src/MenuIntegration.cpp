@@ -1,6 +1,7 @@
 #include "MenuIntegration.h"
 
 #include "AudioSliders.h"
+#include "PluginIni.h"
 #include "SKSEMenuFramework.h"
 #include "Translation.h"
 
@@ -156,11 +157,12 @@ namespace
     bool ModCategoriesEnabled()
     {
         std::error_code ec;
-        const auto      path = std::filesystem::absolute("Data/SKSE/Plugins/QuickAudioSliders.ini", ec);
+        const auto      path = std::filesystem::absolute(QAS::Ini::kPluginIniRelative, ec);
         if (ec || !std::filesystem::exists(path, ec)) {
-            return true;  // no INI yet: the feature is on by default
+            return QAS::Ini::kModCategoriesEnabledDefault;  // no INI yet
         }
-        return GetPrivateProfileIntA("ModCategories", "Enabled", 1, path.string().c_str()) != 0;
+        return GetPrivateProfileIntA(QAS::Ini::kModCategoriesSection, QAS::Ini::kModCategoriesEnabledKey,
+                   QAS::Ini::kModCategoriesEnabledDefault ? 1 : 0, path.string().c_str()) != 0;
     }
 }
 

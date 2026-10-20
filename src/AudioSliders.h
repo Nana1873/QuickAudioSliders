@@ -11,6 +11,13 @@ namespace QAS::Audio
         std::string           widgetID;  // unique ImGui label ("Label##formid")
         bool                  labelOverridden{ false };  // from [Labels] in the plugin INI: shown verbatim
         std::string           rawFullName;  // FULL as the record carries it ("$Effects"), for late translation
+        // Late-translation bookkeeping: a "$Key" FULL whose lookup missed at
+        // kDataLoaded is retried on the first render; the cosmetics the label
+        // went through (mod-prefix strip, pooled form) are recorded so the
+        // retry can re-apply them to the freshly translated name.
+        bool                  labelPendingTranslation{ false };
+        std::string           labelModFile;  // mod file used for label cosmetics ("" = none)
+        bool                  labelPooled{ false };  // label carries the pooled "Other Mods" form
         // Runtime-created per-mod category (see [ModCategories]): no engine
         // slot, persisted only in the plugin INI under persistKey, grouped
         // under ownerFileName.

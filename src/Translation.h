@@ -19,6 +19,9 @@ namespace QAS::Translation
         std::string noRoots = "No root sound categories found; the global slider has no effect.";
         std::string resetAll = "Reset All";
         std::string resetAllConfirm = "Really reset all? (click again)";
+        // resetAllTip and resetTip are printf formats for ImGui tooltips; a
+        // translation is only accepted when its placeholders match these
+        // defaults (LoadStrings validates and falls back otherwise).
         std::string resetAllTip =
             "Resets every category on both pages to its plugin default and the global slider and Vanilla master "
             "to 100%%. Two clicks within %.0f seconds.";

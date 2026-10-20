@@ -8,6 +8,55 @@ namespace
 {
     QAS::Translation::Strings g_strings;
 
+    // The printf argument signature of a format string: every conversion
+    // specifier's final character plus any '*' width/precision ("%.0f%%" ->
+    // "f", "%*d" -> "*d"); std::nullopt for a malformed one (lone trailing
+    // '%'). "%%" consumes nothing and is skipped.
+    std::optional<std::string> FormatSpecs(std::string_view a_text)
+    {
+        std::string specs;
+        for (std::size_t i = 0; i < a_text.size(); ++i) {
+            if (a_text[i] != '%') {
+                continue;
+            }
+            if (++i >= a_text.size()) {
+                return std::nullopt;
+            }
+            if (a_text[i] == '%') {
+                continue;
+            }
+            while (i < a_text.size()) {
+                const char ch = a_text[i];
+                if (ch == '*') {
+                    specs.push_back('*');
+                } else if (std::string_view{ "-+ #0.123456789hljztL" }.find(ch) == std::string_view::npos) {
+                    break;
+                }
+                ++i;
+            }
+            if (i >= a_text.size()) {
+                return std::nullopt;
+            }
+            specs.push_back(a_text[i]);
+        }
+        return specs;
+    }
+
+    // For strings that are handed to printf-style ImGui calls as the format:
+    // a translation whose placeholders do not consume exactly the arguments
+    // the English default does would be undefined behavior, so it is rejected
+    // and the default kept.
+    std::string TranslateFormat(const char* a_key, const std::string& a_default)
+    {
+        auto result = QAS::Translation::Translate(a_key, a_default);
+        if (FormatSpecs(result) != FormatSpecs(a_default)) {
+            logs::warn("Translation for {} has mismatched format placeholders ('{}'); using the English default",
+                a_key, result);
+            return a_default;
+        }
+        return result;
+    }
+
     std::optional<std::string> Lookup(std::string_view a_key)
     {
         // The canonical path first: the translator's virtual Translate(),
@@ -70,9 +119,9 @@ namespace QAS::Translation
         g_strings.noRoots = Translate("$QAS_NoRoots", defaults.noRoots);
         g_strings.resetAll = Translate("$QAS_ResetAll", defaults.resetAll);
         g_strings.resetAllConfirm = Translate("$QAS_ResetAllConfirm", defaults.resetAllConfirm);
-        g_strings.resetAllTip = Translate("$QAS_ResetAllTip", defaults.resetAllTip);
+        g_strings.resetAllTip = TranslateFormat("$QAS_ResetAllTip", defaults.resetAllTip);
         g_strings.reset = Translate("$QAS_Reset", defaults.reset);
-        g_strings.resetTip = Translate("$QAS_ResetTip", defaults.resetTip);
+        g_strings.resetTip = TranslateFormat("$QAS_ResetTip", defaults.resetTip);
         g_strings.vanillaGame = Translate("$QAS_VanillaGame", defaults.vanillaGame);
         g_strings.otherMods = Translate("$QAS_OtherMods", defaults.otherMods);
         g_strings.footer = Translate("$QAS_Footer", defaults.footer);

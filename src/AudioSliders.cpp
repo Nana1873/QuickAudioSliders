@@ -1,5 +1,6 @@
 #include "AudioSliders.h"
 
+#include "PluginIni.h"
 #include "StringConv.h"
 #include "Translation.h"
 
@@ -12,13 +13,12 @@ namespace
     // Plugin-owned volume store for categories the engine cannot persist
     // (it registers only uID0..uID7 / fVal0..fVal7 and restores only those).
     // Keyed by "<defining plugin>|<local FormID>", so a load-order change does
-    // not detach a value from its category. Relative to the game CWD (Game
-    // Root); resolved to an absolute path because the Win32 profile API looks
-    // in the Windows directory for a bare file name.
-    constexpr auto kPluginIniRelative = "Data/SKSE/Plugins/QuickAudioSliders.ini";
+    // not detach a value from its category. Path and [ModCategories] names are
+    // shared with MenuIntegration via PluginIni.h.
+    constexpr auto kPluginIniRelative = QAS::Ini::kPluginIniRelative;
     constexpr auto kVolumesSection = "Volumes";
     constexpr auto kLabelsSection = "Labels";  // plugin INI: <plugin>|<local FormID> = display name
-    constexpr auto kModCategoriesSection = "ModCategories";  // plugin INI: Enabled=1 (default) / 0, MinSounds=3
+    constexpr auto kModCategoriesSection = QAS::Ini::kModCategoriesSection;
     constexpr auto kSrdFolderRelative = "Data/SKSE/Plugins/SoundRecordDistributor";
     constexpr auto kGlobalKey = "GlobalMultiplier";    // [Volumes] key of the "Alle Sounds" slider
     constexpr auto kMasterRepairedKey = "MasterRepaired";  // [Volumes] marker: startup master repair done once
@@ -35,16 +35,24 @@ namespace
     void  BroadcastVolumeChanged();
 
     // Global multiplier state. g_global is what the UI shows (any thread);
-    // the rest is touched on the game thread only.
+    // g_globalActive and the baselines are written on the game thread only
+    // and read relaxed from the render thread (a stale value costs a frame).
     struct RootCategory
     {
         RE::BGSSoundCategory* category{ nullptr };
         std::string           editorID;
-        float                 baseline{ 1.0F };
+        std::atomic<float>    baseline{ 1.0F };
+
+        RootCategory() = default;
+        RootCategory(RootCategory&& a_rhs) noexcept :
+            category(a_rhs.category),
+            editorID(std::move(a_rhs.editorID)),
+            baseline(a_rhs.baseline.load(std::memory_order_relaxed))
+        {}
     };
     std::vector<RootCategory> g_roots;
     std::atomic<float>        g_global{ 1.0F };
-    bool                      g_globalActive{ false };
+    std::atomic<bool>         g_globalActive{ false };
 
     constexpr float kGlobalIdentity = 0.9995F;  // >= this counts as 100%
 
@@ -81,12 +89,13 @@ namespace
                     category->GetFormID(), root.editorID);
                 continue;
             }
-            root.baseline = category->volumeMult;
+            const float baseline = category->volumeMult;
+            root.baseline.store(baseline, std::memory_order_relaxed);
             logs::info("Root category {:08X} '{}' volumeMult {:.4f}{}", category->GetFormID(), root.editorID,
-                root.baseline, category->IsMenuCategory() ? " (menu)" : "");
+                baseline, category->IsMenuCategory() ? " (menu)" : "");
             g_roots.push_back(std::move(root));
         }
-        g_globalActive = false;
+        g_globalActive.store(false, std::memory_order_relaxed);
         g_global.store(1.0F);
     }
 
@@ -94,21 +103,22 @@ namespace
     void ApplyGlobalNow(float a_multiplier)
     {
         const bool identity = a_multiplier >= kGlobalIdentity;
-        if (!g_globalActive) {
+        if (!g_globalActive.load(std::memory_order_relaxed)) {
             if (identity) {
                 return;  // nothing to do, and nothing of ours to undo
             }
             // Taking control: remember what the engine / other mods set.
             for (auto& root : g_roots) {
-                root.baseline = root.category->volumeMult;
+                root.baseline.store(root.category->volumeMult, std::memory_order_relaxed);
             }
-            g_globalActive = true;
+            g_globalActive.store(true, std::memory_order_relaxed);
         }
         for (auto& root : g_roots) {
-            root.category->SetCategoryVolume(identity ? root.baseline : Clamp01(root.baseline * a_multiplier));
+            const float baseline = root.baseline.load(std::memory_order_relaxed);
+            root.category->SetCategoryVolume(identity ? baseline : Clamp01(baseline * a_multiplier));
         }
         if (identity) {
-            g_globalActive = false;  // released: baselines are live again
+            g_globalActive.store(false, std::memory_order_relaxed);  // released: baselines are live again
         }
         BroadcastVolumeChanged();
     }
@@ -372,6 +382,7 @@ namespace
             if (!entry.labelOverridden) {
                 auto& mutableEntry = *g_entries[index];
                 mutableEntry.label = StripModPrefix(mutableEntry.label, fileName);
+                mutableEntry.labelModFile = fileName;
             }
 
             auto it = std::find_if(g_groups.begin(), g_groups.end(),
@@ -408,6 +419,7 @@ namespace
                 auto& entry = *g_entries[index];
                 if (!entry.labelOverridden) {
                     entry.label = PooledLabel(it->fileName, entry.label);
+                    entry.labelPooled = true;
                 }
                 misc.entries.push_back(index);
             }
@@ -577,7 +589,7 @@ namespace
         "; comments are left untouched.\n"sv;
 
     constexpr IniTemplateKey kModCategoriesKeys[] = {
-        { "Enabled"sv,
+        { std::string_view{ QAS::Ini::kModCategoriesEnabledKey },
             "; Enabled: 1 = create the runtime per-mod categories and the \"Auto Sliders\"\n"
             "; page (default), 0 = turn both off. Takes effect on the next game start.\n"
             "Enabled=1"sv },
@@ -592,7 +604,7 @@ namespace
     };
 
     constexpr IniTemplateSection kIniTemplate[] = {
-        { "ModCategories"sv,
+        { std::string_view{ QAS::Ini::kModCategoriesSection },
             "[ModCategories]\n"
             "; Runtime per-mod sliders (page \"Auto Sliders\") for mods whose sounds only\n"
             "; run through Vanilla sound categories (Effects, Ambience, ...). The plugin\n"
@@ -1235,8 +1247,8 @@ namespace
         // keeps its own slider value: while the global multiplier is
         // active the slider sets the root's baseline and the engine sees
         // baseline × global, so the slider never shows the global value.
-        if (auto* root = FindRoot(a_entry.category); root && g_globalActive) {
-            root->baseline = a_volume;
+        if (auto* root = FindRoot(a_entry.category); root && g_globalActive.load(std::memory_order_relaxed)) {
+            root->baseline.store(a_volume, std::memory_order_relaxed);
             a_entry.category->SetCategoryVolume(Clamp01(a_volume * g_global.load()));
         } else {
             a_entry.category->SetCategoryVolume(a_volume);
@@ -1293,7 +1305,8 @@ namespace QAS::Audio
         EnsurePluginIni();
         logs::info("Categories from slot {} on are persisted in '{}' and restored by this plugin",
             g_engineSlots, g_pluginIniPath);
-        const bool modCategoriesEnabled = ReadIniInt(kModCategoriesSection, "Enabled", 1) != 0;
+        const bool modCategoriesEnabled = ReadIniInt(kModCategoriesSection, QAS::Ini::kModCategoriesEnabledKey,
+                                              QAS::Ini::kModCategoriesEnabledDefault ? 1 : 0) != 0;
         const int  modCategoriesMinSounds = ReadIniInt(kModCategoriesSection, "MinSounds", 3);
         logs::info("[ModCategories] Enabled={} MinSounds={}", modCategoriesEnabled ? 1 : 0, modCategoriesMinSounds);
 
@@ -1331,9 +1344,11 @@ namespace QAS::Audio
             if (entry->label.empty()) {
                 entry->label = std::format("{:08X}", entry->formID);
             }
+            entry->labelPendingTranslation =
+                entry->rawFullName.starts_with('$') && entry->label == entry->rawFullName.substr(1);
             if (entry->rawFullName.starts_with('$')) {
                 logs::info("Label for {:08X}: FULL '{}' -> '{}'{}", entry->formID, entry->rawFullName, entry->label,
-                    entry->label == entry->rawFullName.substr(1) ? " (no translation found yet)" : "");
+                    entry->labelPendingTranslation ? " (no translation found yet)" : "");
             }
             // User override: [Labels] <plugin>|<local FormID> = Display name
             // in the plugin INI (same key as the volume store).
@@ -1481,26 +1496,20 @@ namespace QAS::Audio
     {
         std::size_t changed = 0;
         for (auto& entry : g_entries) {
-            if (entry->labelOverridden || entry->synthetic || !entry->rawFullName.starts_with('$')) {
+            if (!entry->labelPendingTranslation || entry->labelOverridden || entry->synthetic) {
                 continue;
             }
-            // Only labels that fell back to the bare key are retried.
-            const auto bareKey = std::string(entry->rawFullName.substr(1));
-            if (!StartsWithNoCase(entry->label, bareKey) && entry->label.find(bareKey) == std::string::npos) {
-                continue;
-            }
-            const auto translated = Translation::Translate(entry->rawFullName);
-            if (translated == bareKey) {
+            auto newLabel = Translation::Translate(entry->rawFullName);
+            if (newLabel == entry->rawFullName.substr(1)) {
                 continue;  // still not in the table
             }
-            // Re-apply the cosmetics the label had at build time: the pooled
-            // prefix is kept by replacing only the key part.
-            auto newLabel = entry->label;
-            const auto pos = newLabel.find(bareKey);
-            if (pos != std::string::npos) {
-                newLabel.replace(pos, bareKey.size(), translated);
-            } else {
-                newLabel = translated;
+            entry->labelPendingTranslation = false;
+            // Re-apply the cosmetics the label went through at build time.
+            if (!entry->labelModFile.empty()) {
+                newLabel = StripModPrefix(newLabel, entry->labelModFile);
+                if (entry->labelPooled) {
+                    newLabel = PooledLabel(entry->labelModFile, newLabel);
+                }
             }
             newLabel = TitleCaseIfAllCaps(newLabel);
             if (newLabel != entry->label) {
@@ -1533,12 +1542,12 @@ namespace QAS::Audio
     float ReadVolume(const Entry& a_entry)
     {
         // Root menu categories show their own (baseline) value while the
-        // global multiplier scales them. g_globalActive / baseline are
-        // written on the game thread; a stale read here costs one frame.
-        if (g_globalActive) {
+        // global multiplier scales them (relaxed reads; written on the game
+        // thread).
+        if (g_globalActive.load(std::memory_order_relaxed)) {
             for (const auto& root : g_roots) {
                 if (root.category == a_entry.category) {
-                    return Clamp01(root.baseline);
+                    return Clamp01(root.baseline.load(std::memory_order_relaxed));
                 }
             }
         }
