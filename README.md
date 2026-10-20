@@ -61,6 +61,14 @@ translation format, UTF-16 LE, `$Key<TAB>Text`). English and German files are
 in `config/Interface/Translations/`. Category names come from the game's own
 translation table and follow the game language.
 
+## Settings
+
+All options live in `Data/SKSE/Plugins/QuickAudioSliders.ini` (under MO2 the
+file is created in `overwrite/SKSE/Plugins/`). The INI is self-documenting:
+it is created with every option, its default and an explaining comment, and
+missing sections or keys are re-added on startup without touching existing
+values or comments.
+
 ## Custom labels
 
 Rename a slider in `Data/SKSE/Plugins/QuickAudioSliders.ini`:

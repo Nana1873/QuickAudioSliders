@@ -461,3 +461,20 @@ the Mods page hint say so.
 this plugin creates. Page names are registered at kPostLoad, before any
 translation table exists, so they stay English; the page hint is translated
 ("Regler, die dieses Plugin für Mods erzeugt …").
+
+## Build 22: self-documenting INI (2026-10-20)
+
+`QuickAudioSliders.ini` now documents itself. A template in `AudioSliders.cpp`
+(`kIniTemplate`) holds every section and key with its default and an English
+comment: `[ModCategories]` `Enabled=1` / `MinSounds=3` / `Exclude=` (with an
+example), `[Labels]` with a commented-out override example, `[Volumes]` with a
+"persistence store, do not edit manually" note. `EnsurePluginIni()` writes the
+full template when the file is missing and retrofits an existing file
+line-based: missing sections are appended whole, missing keys are inserted at
+the end of their section with their comment block; every existing line (user
+values, user comments) is kept verbatim. Reading/writing goes through text-mode
+streams, so line endings stay CRLF. `WritePluginVolume()` lost its own
+first-write header; if the file disappeared since startup it simply calls
+`EnsurePluginIni()` before the Win32 profile write (the previous session's
+attempt to template this path produced syntax errors - kept minimal on
+purpose).

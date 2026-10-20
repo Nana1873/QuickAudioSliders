@@ -573,8 +573,136 @@ namespace
         return static_cast<int>(GetPrivateProfileIntA(a_section, a_key, a_default, g_pluginIniPath.c_str()));
     }
 
-    // Creates the plugin INI with a header and the [ModCategories] defaults
-    // when it does not exist yet, so the opt-in switch is discoverable.
+    // ---- self-documenting INI template ----
+    //
+    // The INI explains itself: every section and key is written with its
+    // default and an English comment. EnsurePluginIni() creates the file from
+    // this template and retrofits missing sections/keys into existing files
+    // without touching user values or comments.
+
+    struct IniTemplateKey
+    {
+        std::string_view name;   // bare key name, for the "is it present?" check
+        std::string_view block;  // comment line(s) + "Key=default"
+    };
+
+    struct IniTemplateSection
+    {
+        std::string_view      name;      // bare section name without brackets
+        std::string_view      block;     // "[Name]" line + section comment
+        const IniTemplateKey* keys;      // keys retrofitted individually
+        std::size_t           keyCount;
+    };
+
+    constexpr auto kIniFileHeader =
+        "; Quick Audio Sliders - settings and persistence store.\n"
+        "; Created and maintained by the plugin: missing sections and keys are re-added\n"
+        "; with their defaults and these comments on startup; existing values and\n"
+        "; comments are left untouched.\n"sv;
+
+    constexpr IniTemplateKey kModCategoriesKeys[] = {
+        { "Enabled"sv,
+            "; Enabled: 1 = create the runtime per-mod categories and the \"Auto Sliders\"\n"
+            "; page (default), 0 = turn both off. Takes effect on the next game start.\n"
+            "Enabled=1"sv },
+        { "MinSounds"sv,
+            "; MinSounds: a mod only gets a slider when at least this many of its sound\n"
+            "; descriptors route through Vanilla categories (default 3).\n"
+            "MinSounds=3"sv },
+        { "Exclude"sv,
+            "; Exclude: comma-separated, case-insensitive plugin-name substrings that\n"
+            "; never get a runtime category. Example: Exclude=EVE,Taberu\n"
+            "Exclude="sv },
+    };
+
+    constexpr IniTemplateSection kIniTemplate[] = {
+        { "ModCategories"sv,
+            "[ModCategories]\n"
+            "; Runtime per-mod sliders (page \"Auto Sliders\") for mods whose sounds only\n"
+            "; run through Vanilla sound categories (Effects, Ambience, ...). The plugin\n"
+            "; creates one in-memory sound category per mod at startup; nothing is written\n"
+            "; to disk or into save games, and mods that already own a menu slider are\n"
+            "; skipped."sv,
+            kModCategoriesKeys, std::size(kModCategoriesKeys) },
+        { "Labels"sv,
+            "[Labels]\n"
+            "; Optional display-name overrides for sliders, shown verbatim.\n"
+            "; Key = <plugin file>|<local FormID, 6 hex digits>; the startup log lists\n"
+            "; the key of every category. Example (remove the ';' to use it):\n"
+            ";Audio Overhaul Skyrim.esp|00AA6E=Waterfalls"sv,
+            nullptr, 0 },
+        { "Volumes"sv,
+            "[Volumes]\n"
+            "; Persistence store written by the plugin on slider release: volumes of\n"
+            "; categories without an engine [AudioMenu] slot, GlobalMultiplier, runtime\n"
+            "; mod categories (mod:<plugin>|<parent FormID>) and the MasterRepaired\n"
+            "; marker. Managed by the plugin - do not edit manually."sv,
+            nullptr, 0 },
+    };
+
+    std::string_view TrimLeft(std::string_view a_text)
+    {
+        while (!a_text.empty() && (a_text.front() == ' ' || a_text.front() == '\t')) {
+            a_text.remove_prefix(1);
+        }
+        return a_text;
+    }
+
+    std::string_view TrimRight(std::string_view a_text)
+    {
+        while (!a_text.empty() && (a_text.back() == ' ' || a_text.back() == '\t' || a_text.back() == '\r')) {
+            a_text.remove_suffix(1);
+        }
+        return a_text;
+    }
+
+    bool IsSectionHeader(std::string_view a_line, std::string_view a_name)
+    {
+        const auto line = TrimRight(TrimLeft(a_line));
+        if (line.size() < 2 || line.front() != '[' || line.back() != ']') {
+            return false;
+        }
+        return EqualsNoCase(TrimRight(TrimLeft(line.substr(1, line.size() - 2))), a_name);
+    }
+
+    bool IsAnySectionHeader(std::string_view a_line)
+    {
+        const auto line = TrimLeft(a_line);
+        return !line.empty() && line.front() == '[';
+    }
+
+    bool IsKeyLine(std::string_view a_line, std::string_view a_key)
+    {
+        const auto line = TrimLeft(a_line);
+        if (line.empty() || line.front() == ';' || line.front() == '[') {
+            return false;
+        }
+        const auto eq = line.find('=');
+        if (eq == std::string_view::npos) {
+            return false;
+        }
+        return EqualsNoCase(TrimRight(line.substr(0, eq)), a_key);
+    }
+
+    void AppendBlockLines(std::vector<std::string>& a_lines, std::size_t a_at, std::string_view a_block)
+    {
+        std::vector<std::string> block;
+        for (std::size_t start = 0; start <= a_block.size();) {
+            const auto end = a_block.find('\n', start);
+            if (end == std::string_view::npos) {
+                block.emplace_back(a_block.substr(start));
+                break;
+            }
+            block.emplace_back(a_block.substr(start, end - start));
+            start = end + 1;
+        }
+        a_lines.insert(a_lines.begin() + static_cast<std::ptrdiff_t>(a_at), block.begin(), block.end());
+    }
+
+    // Creates the plugin INI from the template when it does not exist, and
+    // appends template sections/keys (with their comments) that are missing
+    // from an existing file. Never rewrites lines that are already there, so
+    // user values and comments survive.
     void EnsurePluginIni()
     {
         if (g_pluginIniPath.empty()) {
@@ -582,24 +710,97 @@ namespace
         }
         std::error_code ec;
         const auto      path = std::filesystem::path(g_pluginIniPath);
-        if (std::filesystem::exists(path, ec)) {
+        std::filesystem::create_directories(path.parent_path(), ec);
+
+        std::vector<std::string> lines;
+        const bool               existed = std::filesystem::exists(path, ec);
+        if (existed) {
+            std::ifstream in(path);  // text mode: getline strips \r\n
+            for (std::string line; std::getline(in, line);) {
+                lines.push_back(std::move(line));
+            }
+        }
+
+        bool changed = false;
+        if (lines.empty()) {
+            AppendBlockLines(lines, 0, kIniFileHeader);
+            changed = true;
+        }
+
+        for (const auto& section : kIniTemplate) {
+            auto headerIdx = lines.size();
+            for (std::size_t i = 0; i < lines.size(); ++i) {
+                if (IsSectionHeader(lines[i], section.name)) {
+                    headerIdx = i;
+                    break;
+                }
+            }
+            if (headerIdx == lines.size()) {
+                // Whole section missing: append it with every key.
+                if (!lines.empty() && !TrimRight(lines.back()).empty()) {
+                    lines.emplace_back();
+                }
+                AppendBlockLines(lines, lines.size(), section.block);
+                for (std::size_t k = 0; k < section.keyCount; ++k) {
+                    lines.emplace_back();
+                    AppendBlockLines(lines, lines.size(), section.keys[k].block);
+                }
+                changed = true;
+                continue;
+            }
+            // Section exists: find its end and retrofit missing keys there.
+            auto sectionEnd = lines.size();
+            for (auto i = headerIdx + 1; i < lines.size(); ++i) {
+                if (IsAnySectionHeader(lines[i])) {
+                    sectionEnd = i;
+                    break;
+                }
+            }
+            for (std::size_t k = 0; k < section.keyCount; ++k) {
+                const auto& key = section.keys[k];
+                bool        found = false;
+                for (auto i = headerIdx + 1; i < sectionEnd; ++i) {
+                    if (IsKeyLine(lines[i], key.name)) {
+                        found = true;
+                        break;
+                    }
+                }
+                if (found) {
+                    continue;
+                }
+                // Insert before trailing blank lines of the section, with one
+                // blank separator line in front of the key's comment block.
+                auto insertAt = sectionEnd;
+                while (insertAt > headerIdx + 1 && TrimRight(lines[insertAt - 1]).empty()) {
+                    --insertAt;
+                }
+                lines.insert(lines.begin() + static_cast<std::ptrdiff_t>(insertAt), std::string{});
+                AppendBlockLines(lines, insertAt + 1, key.block);
+                changed = true;
+                // Recompute the section end after the insertion.
+                sectionEnd = lines.size();
+                for (auto i = headerIdx + 1; i < lines.size(); ++i) {
+                    if (IsAnySectionHeader(lines[i])) {
+                        sectionEnd = i;
+                        break;
+                    }
+                }
+            }
+        }
+
+        if (!changed) {
             return;
         }
-        std::filesystem::create_directories(path.parent_path(), ec);
-        if (std::FILE* file = std::fopen(g_pluginIniPath.c_str(), "w")) {
-            std::fputs("; Quick Audio Sliders\n"
-                       "; [Volumes]  volumes of sound categories without an [AudioMenu] slot (the engine keeps\n"
-                       ";            only uID0..uID7), GlobalMultiplier, and runtime mod categories (mod:<plugin>).\n"
-                       "; [Labels]   <plugin file>|<local FormID> = display name (optional overrides).\n"
-                       "; [ModCategories] Enabled=1 (default) creates a runtime sound category per mod that routes at least\n"
-                       ";            MinSounds sound descriptors through Vanilla categories, so it gets its own\n"
-                       ";            slider (page \"Mods\"); Enabled=0 turns it off; Exclude=a.esp,b.esp skips mods. Mods that\n"
-                       ";            already own a menu slider are skipped. Dynamic forms only (nothing on disk, nothing in saves).\n"
-                       "\n[ModCategories]\nEnabled=1\nMinSounds=3\n\n[Volumes]\n",
-                file);
-            std::fclose(file);
-            logs::info("Created '{}' with defaults", g_pluginIniPath);
+        std::ofstream out(path, std::ios::trunc);  // text mode: \n becomes \r\n
+        if (!out) {
+            logs::warn("Cannot write '{}'", g_pluginIniPath);
+            return;
         }
+        for (const auto& line : lines) {
+            out << line << '\n';
+        }
+        logs::info("{} '{}' ({} the self-documenting template)", existed ? "Updated" : "Created", g_pluginIniPath,
+            existed ? "appended missing parts of" : "wrote");
     }
 
     // "<defining plugin file>|<local FormID, 6 hex digits>", e.g.
@@ -649,16 +850,10 @@ namespace
         }
         std::error_code ec;
         const auto      path = std::filesystem::path(g_pluginIniPath);
-        std::filesystem::create_directories(path.parent_path(), ec);
         if (!std::filesystem::exists(path, ec)) {
-            // First write: leave a short header so the file explains itself.
-            if (std::FILE* file = std::fopen(g_pluginIniPath.c_str(), "w")) {
-                std::fputs("; Quick Audio Sliders - volumes of sound categories that have no [AudioMenu]\n"
-                           "; slot in SkyrimPrefs.ini (the engine keeps only uID0..uID7). Written on\n"
-                           "; slider release, applied at kDataLoaded. Key = <plugin file>|<local FormID>.\n",
-                    file);
-                std::fclose(file);
-            }
+            // First write without a file (deleted since startup): recreate the
+            // commented template so the key lands in a self-documenting file.
+            EnsurePluginIni();
         }
         return WritePrivateProfileStringA(kVolumesSection, a_key.c_str(), std::format("{:.4f}", a_volume).c_str(),
                    g_pluginIniPath.c_str()) != 0;
