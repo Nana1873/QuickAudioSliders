@@ -282,6 +282,13 @@ namespace
     // Case mapping goes through the Win32 Unicode API, so umlauts work.
     std::string TitleCaseIfAllCaps(const std::string& a_label)
     {
+        // A FULL that is not valid UTF-8 (legacy 1252-encoded ESPs) is left
+        // alone rather than mangled to U+FFFD by the conversion round trip.
+        if (!a_label.empty() &&
+            MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, a_label.data(), static_cast<int>(a_label.size()),
+                nullptr, 0) == 0) {
+            return a_label;
+        }
         auto wide = QAS::Text::ToWide(a_label);
         if (wide.size() <= 3) {
             return a_label;
@@ -704,6 +711,13 @@ namespace
         const bool               existed = std::filesystem::exists(path, ec);
         if (existed) {
             std::ifstream in(path);  // text mode: getline strips \r\n
+            if (!in) {
+                // An existing file that cannot be read (AV/sharing lock,
+                // permissions) must not be mistaken for an empty one: the
+                // rewrite below would truncate the user's stored values.
+                logs::warn("Cannot read '{}'; leaving it untouched", g_pluginIniPath);
+                return;
+            }
             for (std::string line; std::getline(in, line);) {
                 lines.push_back(std::move(line));
             }
@@ -822,9 +836,12 @@ namespace
         if (buffer[0] == '\0') {
             return std::nullopt;
         }
-        char*       end = nullptr;
-        const float value = std::strtof(buffer, &end);
-        if (end == buffer || !std::isfinite(value)) {
+        // std::from_chars, not strtof: strtof parses through the C locale,
+        // which another plugin in the process may have changed (a "0.9500"
+        // read as 0.0 would silently mute everything restored).
+        float      value = 0.0F;
+        const auto result = std::from_chars(buffer, buffer + std::string_view{ buffer }.size(), value);
+        if (result.ec != std::errc{} || !std::isfinite(value)) {
             logs::warn("[{}] {} = '{}' in '{}' is not a number; ignored", kVolumesSection, a_key, buffer, g_pluginIniPath);
             return std::nullopt;
         }
@@ -1203,7 +1220,9 @@ namespace
             entry->labelOverridden = true;  // already tidy; keep the mod name as is
             entry->synthetic = true;
             entry->ownerFileName = plan.pluginFile;
-            entry->persistKey = std::format("mod:{}|{:08X}", plan.pluginFile, plan.parent->GetFormID() & 0x00FFFFFF);
+            // GetLocalFormID, not a mask: an ESL-defined parent's FE-prefixed
+            // slot is load-order-dependent and must stay out of the key.
+            entry->persistKey = std::format("mod:{}|{:08X}", plan.pluginFile, plan.parent->GetLocalFormID());
             logs::info("Mod category '{}' {:08X} for {} descriptor(s) of '{}' (parent {:08X} '{}', key '{}')", label,
                 entry->formID, plan.descriptors.size(), plan.pluginFile, plan.parent->GetFormID(), parentLabel,
                 entry->persistKey);

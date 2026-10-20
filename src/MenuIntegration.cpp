@@ -61,8 +61,12 @@ namespace
     bool BeginPage()
     {
         const auto& strings = QAS::Translation::S();
-        if (!QAS::Audio::IsReady() || QAS::Audio::Count() == 0) {
+        if (!QAS::Audio::IsReady()) {
             ImGuiMCP::TextDisabled("%s", strings.waiting.c_str());
+            return false;
+        }
+        if (QAS::Audio::Count() == 0) {
+            ImGuiMCP::TextDisabled("%s", strings.noCategories.c_str());
             return false;
         }
         // Translation files imported after kDataLoaded are complete by the
@@ -126,7 +130,7 @@ namespace
         // Global multiplier on top: scales every sound category root (the
         // whole volume tree, menu-visible or not); saved in the plugin INI
         // and applied again on startup. 100% restores the exact previous state.
-        ImGuiMCP::SeparatorText("Global");
+        ImGuiMCP::SeparatorText(strings.globalHeading.c_str());
         {
             auto       percent = QAS::Audio::GetGlobal() * 100.0F;
             const auto label = strings.global + "##global";

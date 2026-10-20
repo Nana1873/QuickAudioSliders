@@ -14,6 +14,7 @@ namespace QAS::Translation
     // kDataLoaded). Resolved once by LoadStrings().
     struct Strings
     {
+        std::string globalHeading = "Global";
         std::string global = "All Sounds (global)";
         std::string globalHint = "Multiplies every sound category; saved and applied again on startup.";
         std::string noRoots = "No root sound categories found; the global slider has no effect.";
@@ -35,6 +36,7 @@ namespace QAS::Translation
         std::string otherMods = "Other Mods";
         std::string footer = "Changes apply immediately and are saved.";
         std::string waiting = "Waiting for game data to load...";
+        std::string noCategories = "No sound categories with a menu slider found in this load order.";
     };
 
     void           LoadStrings();

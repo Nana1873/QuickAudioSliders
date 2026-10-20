@@ -9,9 +9,10 @@ namespace
     QAS::Translation::Strings g_strings;
 
     // The printf argument signature of a format string: every conversion
-    // specifier's final character plus any '*' width/precision ("%.0f%%" ->
-    // "f", "%*d" -> "*d"); std::nullopt for a malformed one (lone trailing
-    // '%'). "%%" consumes nothing and is skipped.
+    // specifier's length modifiers and final character plus any '*'
+    // width/precision ("%.0f%%" -> "f", "%*d" -> "*d", "%lld" -> "lld");
+    // std::nullopt for a malformed one (lone trailing '%'). "%%" consumes
+    // nothing and is skipped.
     std::optional<std::string> FormatSpecs(std::string_view a_text)
     {
         std::string specs;
@@ -27,9 +28,9 @@ namespace
             }
             while (i < a_text.size()) {
                 const char ch = a_text[i];
-                if (ch == '*') {
-                    specs.push_back('*');
-                } else if (std::string_view{ "-+ #0.123456789hljztL" }.find(ch) == std::string_view::npos) {
+                if (ch == '*' || std::string_view{ "hljztL" }.find(ch) != std::string_view::npos) {
+                    specs.push_back(ch);  // changes what the argument is / how it is read
+                } else if (std::string_view{ "-+ #0.123456789" }.find(ch) == std::string_view::npos) {
                     break;
                 }
                 ++i;
@@ -114,6 +115,7 @@ namespace QAS::Translation
     void LoadStrings()
     {
         Strings defaults;
+        g_strings.globalHeading = Translate("$QAS_GlobalHeading", defaults.globalHeading);
         g_strings.global = Translate("$QAS_Global", defaults.global);
         g_strings.globalHint = Translate("$QAS_GlobalHint", defaults.globalHint);
         g_strings.noRoots = Translate("$QAS_NoRoots", defaults.noRoots);
@@ -128,6 +130,7 @@ namespace QAS::Translation
         g_strings.modsPageHint = Translate("$QAS_ModsPageHint", defaults.modsPageHint);
         g_strings.modsPageEmpty = Translate("$QAS_ModsPageEmpty", defaults.modsPageEmpty);
         g_strings.waiting = Translate("$QAS_Waiting", defaults.waiting);
+        g_strings.noCategories = Translate("$QAS_NoCategories", defaults.noCategories);
         logs::info("UI strings loaded ('{}' / '{}')", g_strings.resetAll, g_strings.otherMods);
     }
 
