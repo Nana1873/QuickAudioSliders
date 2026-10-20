@@ -26,12 +26,6 @@ I got tired of hitting Escape, then Settings, then Audio, every time I just want
 - **Real persistence.** Vanilla can only remember 8 slider values; with a modded load order the rest silently reset every restart. This plugin saves them all, keyed so even load-order changes don't matter.
 - **Readable labels** in your game language, custom names via INI, self-documenting config file, English and German UI included.
 
-## Requirements
-
-- [SKSE64](https://skse.silverlock.org/)
-- [SKSE Menu Framework 3](https://www.nexusmods.com/skyrimspecialedition/mods/120352) (renders the panel, open it with the framework's hotkey, default F1)
-- [Address Library for SKSE Plugins](https://www.nexusmods.com/skyrimspecialedition/mods/32444)
-
 ## Supported runtimes
 
 One DLL for Skyrim SE **1.5.97** and AE **1.6.x** (including 1.6.1170) via Address Library. The build also carries AE 1.7.x support from CommonLibSSE-NG. Skyrim VR is untested.
@@ -46,7 +40,7 @@ Interface/Translations/QuickAudioSliders_ENGLISH.txt
 Interface/Translations/QuickAudioSliders_GERMAN.txt
 ```
 
-No ESP, no FOMOD, no patches needed. Open the SKSE Menu Framework menu in-game and pick the "Quick Audio Sliders" section.
+No ESP, no FOMOD, no patches needed. Requirements are listed at the top of this page (SKSE64, SKSE Menu Framework 3, Address Library). Open the SKSE Menu Framework menu in-game (its hotkey, default F1) and pick the "Quick Audio Sliders" section.
 
 ## Configuration
 
