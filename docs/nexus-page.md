@@ -69,13 +69,13 @@ No. Values for the first eight categories go through the same `[AudioMenu]` slot
 
 ## Credits
 
-- **AI development:** built with Claude by Anthropic; all in-game testing done by me.
-- [SKSE](https://skse.silverlock.org/) by the SKSE team, the foundation everything here stands on.
-- [SKSE Menu Framework 3](https://www.nexusmods.com/skyrimspecialedition/mods/120352) by QTR-Modding (Thiago Kaique), MIT. It renders the panel and embeds [Dear ImGui](https://github.com/ocornut/imgui) by Omar Cornut and contributors, MIT.
-- [CommonLibSSE-NG](https://github.com/alandtse/CommonLibSSE-NG) by alandtse, CharmedBaryon and the CommonLibSSE contributors, GPL-3.0-or-later (with modding exceptions; originally MIT).
-- [Address Library for SKSE Plugins](https://www.nexusmods.com/skyrimspecialedition/mods/32444) by meh321.
-- Build dependencies via vcpkg: [spdlog](https://github.com/gabime/spdlog) (logging) and, through CommonLibSSE-NG, [fmt](https://github.com/fmtlib/fmt), Microsoft DirectXTK / DirectXMath and [rapidcsv](https://github.com/d99kris/rapidcsv).
-- **Research / tools:** engine analysis (volume broadcast, master volume path, translation table) performed with [Ghidra](https://ghidra-sre.org/) by the NSA, [Bethesda Ghidra Scripts](https://github.com/doodlum/BethesdaGhidraScripts) by doodlum and [GhidrAssistMCP](https://github.com/jtang613/GhidrAssistMCP) by Jason Tang, MIT. No code from these projects is included in the mod.
+- [SKSE](https://skse.silverlock.org/) by the SKSE team
+- [SKSE Menu Framework 3](https://www.nexusmods.com/skyrimspecialedition/mods/120352) by QTR-Modding
+- [Dear ImGui](https://github.com/ocornut/imgui) by Omar Cornut
+- [CommonLibSSE-NG](https://github.com/alandtse/CommonLibSSE-NG) by alandtse and contributors
+- [Address Library for SKSE Plugins](https://www.nexusmods.com/skyrimspecialedition/mods/32444) by meh321
+- [Bethesda Ghidra Scripts](https://github.com/doodlum/BethesdaGhidraScripts) by doodlum (engine research, no code included)
+- Claude by Anthropic (see disclaimer up top)
 
 ## Source
 
