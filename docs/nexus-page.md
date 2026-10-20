@@ -67,10 +67,6 @@ No. Values for the first eight categories go through the same `[AudioMenu]` slot
 **Where is the log?**
 `My Games/Skyrim Special Edition/SKSE/QuickAudioSliders.log`. It lists every category with its INI key, every restored value and every label translation at startup.
 
-## Permissions
-
-Downloads are available exclusively here on Nexus Mods, please don't re-upload the files to other sites. The source code is licensed under GPL-3.0, so ports and forks are welcome under the same license with credit.
-
 ## Credits
 
 - **AI development:** built with Claude by Anthropic; all in-game testing done by me.
