@@ -11,24 +11,20 @@ In-game volume panel for every sound category, via SKSE Menu Framework. Global s
 
 ## Description
 
-**Full disclosure up front:** this mod was developed with AI (Claude). I tested it myself in-game, every feature, over many sessions. If that's not for you, no hard feelings.
+**Full disclosure up front:** this mod was developed with AI (Claude). I tested everything myself in-game.
 
-**Why this exists:** I got tired of hitting Escape, then Settings, then Audio, every single time I just wanted to turn the music down a bit. There was no mod that put the audio sliders into a quick in-game panel, so I built one.
+I got tired of hitting Escape, then Settings, then Audio, every time I just wanted to turn the music down a bit. No mod put the audio sliders into a quick in-game panel, so I built one: an audio panel in the SKSE Menu Framework menu. Changes apply instantly, even to sounds already playing.
 
-**What it does:** Quick Audio Sliders adds an audio panel to the SKSE Menu Framework menu, so you can change volumes while playing. No reloads, no INI editing, changes apply instantly, even to sounds that are already playing.
+**Page "Volume"**: every sound category that appears on the audio menu, vanilla and modded (Audio Overhaul, ISC, ambience mods and so on), grouped by the mod it belongs to.
 
-**Page "Volume"** has every sound category that is flagged to appear on the audio menu. That's the vanilla sliders plus everything your sound mods add (Audio Overhaul, ISC, ambience mods and so on), grouped by the mod each category belongs to, vanilla first. Changes go through the same engine path the vanilla slider uses.
+**Page "Extra Sliders"**: my favorite part. Many sound mods route their sounds through vanilla categories like Effects or Ambience and never get their own slider. The plugin detects them at startup and gives each one its own slider, via in-memory categories. Nothing touches your plugins or saves (verified clean with ReSaver).
 
-**Page "Extra Sliders"** is the part I'm most happy with: lots of sound mods route their sounds through vanilla categories like Effects or Ambience and never get a slider of their own. The plugin finds those mods at startup and builds one in-memory sound category per mod, so each of them gets its own volume slider. Nothing is written to your plugins or saves, the categories only exist at runtime, and I verified with ReSaver that saves stay clean.
+**Also in the box**
 
-**Features**
-
-- **"All Sounds (global)" slider.** One knob that scales everything, including mod categories that sit outside the vanilla master tree and that the vanilla master slider never reaches. Saved and restored across sessions.
-- **Reset buttons.** Every slider has a Reset to its record default (the value the mod author intended). "Reset All" (click twice to confirm) restores every category, the global slider and the vanilla master.
-- **Real persistence.** The engine can only remember 8 slider values in `SkyrimPrefs.ini`. `[AudioMenu]` has exactly eight slots, that's a vanilla limitation. With a modded load order you easily have 20+ categories, so the rest silently reset on every restart. This plugin stores every value in its own INI, keyed by plugin and FormID, so values survive restarts and even load-order changes.
-- **Readable labels.** Category names come from the game's own translation table and follow your game language. ALL-CAPS names are shown in title case, redundant mod prefixes are stripped, and you can rename any slider via INI.
-- **Self-documenting INI.** `Data/SKSE/Plugins/QuickAudioSliders.ini` is created with every option, its default and a comment explaining it. Updates re-add missing options without touching your values. (Under MO2 the file shows up in `overwrite/SKSE/Plugins/`.)
-- **Localized UI.** English and German included. Translators only need a standard SKSE translation file (`Interface/Translations/QuickAudioSliders_<LANGUAGE>.txt`).
+- **"All Sounds (global)" slider** that scales everything, including categories the vanilla master slider never reaches.
+- **Reset per slider** (back to the mod author's default) and a two-click **Reset All**.
+- **Real persistence.** Vanilla can only remember 8 slider values; with a modded load order the rest silently reset every restart. This plugin saves them all, keyed so even load-order changes don't matter.
+- **Readable labels** in your game language, custom names via INI, self-documenting config file, English and German UI included.
 
 ## Requirements
 
