@@ -16,21 +16,16 @@ namespace QAS::Translation
     {
         std::string globalHeading = "Global";
         std::string global = "All Sounds (global)";
-        std::string globalHint = "Multiplies every sound category; saved and applied again on startup.";
         std::string noRoots = "No root sound categories found; the global slider has no effect.";
         std::string resetAll = "Reset All";
-        std::string resetAllConfirm = "Really reset all? (click again)";
-        // resetAllTip and resetTip are printf formats for ImGui tooltips; a
-        // translation is only accepted when its placeholders match these
-        // defaults (LoadStrings validates and falls back otherwise).
-        std::string resetAllTip =
-            "Resets every category on both pages to its plugin default and the global slider and Vanilla master "
-            "to 100%%. Two clicks within %.0f seconds.";
-        std::string modsPageHint =
-            "Sliders this plugin creates for mods whose sounds only use Vanilla categories ([ModCategories] in "
-            "QuickAudioSliders.ini). The global slider and Reset All on the Volume page apply here too.";
+        std::string resetAllConfirm = "Confirm?";  // armed button label (two-click confirmation)
+        std::string resetAllTip = "Resets all sliders on both pages.";
+        std::string modsPageHint = "Extra sliders for mods that have no volume slider of their own.";
         std::string modsPageEmpty = "No mod qualified (needs at least MinSounds eligible sound descriptors).";
         std::string reset = "Reset";
+        // resetTip is a printf format for an ImGui tooltip; a translation is
+        // only accepted when its placeholders match this default (LoadStrings
+        // validates and falls back otherwise).
         std::string resetTip = "Reset to %.0f%% (plugin default)";
         std::string vanillaGame = "Vanilla Game";
         std::string otherMods = "Other Mods";

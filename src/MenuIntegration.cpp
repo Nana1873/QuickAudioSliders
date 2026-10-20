@@ -53,7 +53,7 @@ namespace
             }
         }
         if (ImGuiMCP::IsItemHovered()) {
-            ImGuiMCP::SetTooltip(strings.resetAllTip.c_str(), kConfirmSeconds);
+            ImGuiMCP::SetTooltip("%s", strings.resetAllTip.c_str());
         }
     }
 
@@ -142,8 +142,9 @@ namespace
             }
             ImGuiMCP::SameLine();
             RenderResetAll();
-            ImGuiMCP::TextDisabled("%s",
-                QAS::Audio::RootCount() == 0 ? strings.noRoots.c_str() : strings.globalHint.c_str());
+            if (QAS::Audio::RootCount() == 0) {
+                ImGuiMCP::TextDisabled("%s", strings.noRoots.c_str());
+            }
         }
 
         // Groups are flat, always-visible sections: Vanilla first, then one

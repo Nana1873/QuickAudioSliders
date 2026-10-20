@@ -117,11 +117,10 @@ namespace QAS::Translation
         Strings defaults;
         g_strings.globalHeading = Translate("$QAS_GlobalHeading", defaults.globalHeading);
         g_strings.global = Translate("$QAS_Global", defaults.global);
-        g_strings.globalHint = Translate("$QAS_GlobalHint", defaults.globalHint);
         g_strings.noRoots = Translate("$QAS_NoRoots", defaults.noRoots);
         g_strings.resetAll = Translate("$QAS_ResetAll", defaults.resetAll);
         g_strings.resetAllConfirm = Translate("$QAS_ResetAllConfirm", defaults.resetAllConfirm);
-        g_strings.resetAllTip = TranslateFormat("$QAS_ResetAllTip", defaults.resetAllTip);
+        g_strings.resetAllTip = Translate("$QAS_ResetAllTip", defaults.resetAllTip);
         g_strings.reset = Translate("$QAS_Reset", defaults.reset);
         g_strings.resetTip = TranslateFormat("$QAS_ResetTip", defaults.resetTip);
         g_strings.vanillaGame = Translate("$QAS_VanillaGame", defaults.vanillaGame);
