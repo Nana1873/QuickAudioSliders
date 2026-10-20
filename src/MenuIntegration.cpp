@@ -18,7 +18,6 @@ namespace
         const auto& strings = QAS::Translation::S();
         auto&       entry = QAS::Audio::Get(a_index);
         ImGuiMCP::PushID(static_cast<int>(a_index));
-        // Small per-slider reset in front of the slider.
         if (ImGuiMCP::SmallButton(strings.reset.c_str())) {
             QAS::Audio::ResetEntry(a_index);
         }

@@ -9,12 +9,10 @@
 #include <cctype>
 #include <cmath>
 #include <cstdint>
-#include <cstdio>
 #include <cstdlib>
 #include <filesystem>
 #include <format>
 #include <fstream>
-#include <mutex>
 #include <optional>
 #include <string>
 #include <string_view>

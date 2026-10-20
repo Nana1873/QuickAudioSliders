@@ -1,5 +1,6 @@
 #include "AudioSliders.h"
 
+#include "StringConv.h"
 #include "Translation.h"
 
 namespace
@@ -265,35 +266,13 @@ namespace
 
     // ---- label cosmetics ----
 
-    std::wstring ToWide(std::string_view a_utf8)
-    {
-        if (a_utf8.empty()) {
-            return {};
-        }
-        const auto size = MultiByteToWideChar(CP_UTF8, 0, a_utf8.data(), static_cast<int>(a_utf8.size()), nullptr, 0);
-        std::wstring result(static_cast<std::size_t>(size), L'\0');
-        MultiByteToWideChar(CP_UTF8, 0, a_utf8.data(), static_cast<int>(a_utf8.size()), result.data(), size);
-        return result;
-    }
-
-    std::string ToUtf8(std::wstring_view a_wide)
-    {
-        if (a_wide.empty()) {
-            return {};
-        }
-        const auto size = WideCharToMultiByte(CP_UTF8, 0, a_wide.data(), static_cast<int>(a_wide.size()), nullptr, 0, nullptr, nullptr);
-        std::string result(static_cast<std::size_t>(size), '\0');
-        WideCharToMultiByte(CP_UTF8, 0, a_wide.data(), static_cast<int>(a_wide.size()), result.data(), size, nullptr, nullptr);
-        return result;
-    }
-
     // "RÜSTUNG" -> "Rüstung", "WAFFEN" -> "Waffen". Only labels that are
     // entirely upper case (at least one letter, more than three characters)
     // are touched; mixed-case names and short acronyms stay as they are.
     // Case mapping goes through the Win32 Unicode API, so umlauts work.
     std::string TitleCaseIfAllCaps(const std::string& a_label)
     {
-        auto wide = ToWide(a_label);
+        auto wide = QAS::Text::ToWide(a_label);
         if (wide.size() <= 3) {
             return a_label;
         }
@@ -323,7 +302,7 @@ namespace
                 startOfWord = (ch == L' ' || ch == L'-' || ch == L'_' || ch == L'/' || ch == L'(');
             }
         }
-        return ToUtf8(wide);
+        return QAS::Text::ToUtf8(wide);
     }
 
     // "AOS_Ambience" under group "Audio Overhaul Skyrim" -> "Ambience".
@@ -375,7 +354,6 @@ namespace
         g_groups.clear();
         QAS::Audio::Group vanilla;
         vanilla.label = QAS::Translation::S().vanillaGame;
-        vanilla.widgetID = vanilla.label + "##vanilla";
         vanilla.vanilla = true;
         g_groups.push_back(std::move(vanilla));
 
@@ -402,7 +380,6 @@ namespace
                 QAS::Audio::Group group;
                 group.fileName = fileName;
                 group.label = StripExtension(fileName);
-                group.widgetID = std::format("{}##{}", group.label, fileName);
                 // "DEFAULT" is the Creation Kit's placeholder author; hide it.
                 if (file) {
                     if (const char* author = file->createdBy.c_str();
@@ -421,7 +398,6 @@ namespace
         // stays visible.
         QAS::Audio::Group misc;
         misc.label = QAS::Translation::S().otherMods;
-        misc.widgetID = misc.label + "##misc";
         misc.misc = true;
         for (auto it = std::next(g_groups.begin()); it != g_groups.end();) {
             if (it->entries.size() >= QAS::Audio::kMinGroupSize) {
@@ -910,7 +886,7 @@ namespace
         logs::info("Vanilla master volume restored to 100% ({})", a_reason);
     }
 
-    // ---- runtime per-mod categories (opt-in) ----
+    // ---- runtime per-mod categories ([ModCategories] in the plugin INI) ----
 
     struct ModCategoryPlan
     {
@@ -1216,9 +1192,6 @@ namespace
             entry->synthetic = true;
             entry->ownerFileName = plan.pluginFile;
             entry->persistKey = std::format("mod:{}|{:08X}", plan.pluginFile, plan.parent->GetFormID() & 0x00FFFFFF);
-            entry->slot = -1;
-            entry->uiVolume = 1.0F;
-            entry->widgetID = std::format("{}##{:08X}", entry->label, entry->formID);
             logs::info("Mod category '{}' {:08X} for {} descriptor(s) of '{}' (parent {:08X} '{}', key '{}')", label,
                 entry->formID, plan.descriptors.size(), plan.pluginFile, plan.parent->GetFormID(), parentLabel,
                 entry->persistKey);
@@ -1258,24 +1231,15 @@ namespace
 
     void ApplyNow(QAS::Audio::Entry& a_entry, float a_volume)
     {
-        if (a_entry.category) {
-            // A menu category that is also a root (SkyParkour, Word Walls)
-            // keeps its own slider value: while the global multiplier is
-            // active the slider sets the root's baseline and the engine sees
-            // baseline × global, so the slider never shows the global value.
-            if (auto* root = FindRoot(a_entry.category); root && g_globalActive) {
-                root->baseline = a_volume;
-                a_entry.category->SetCategoryVolume(Clamp01(a_volume * g_global.load()));
-            } else {
-                a_entry.category->SetCategoryVolume(a_volume);
-            }
+        // A menu category that is also a root (SkyParkour, Word Walls)
+        // keeps its own slider value: while the global multiplier is
+        // active the slider sets the root's baseline and the engine sees
+        // baseline × global, so the slider never shows the global value.
+        if (auto* root = FindRoot(a_entry.category); root && g_globalActive) {
+            root->baseline = a_volume;
+            a_entry.category->SetCategoryVolume(Clamp01(a_volume * g_global.load()));
         } else {
-            if (auto* setting = FindPref(kMasterSetting)) {
-                setting->data.f = a_volume;
-            }
-            if (auto* audio = RE::BSAudioManager::GetSingleton()) {
-                audio->masterVolume = a_volume;
-            }
+            a_entry.category->SetCategoryVolume(a_volume);
         }
         BroadcastVolumeChanged();
     }
@@ -1382,7 +1346,6 @@ namespace QAS::Audio
                     logs::info("Label override for {}: '{}'", key, entry->label);
                 }
             }
-            entry->widgetID = std::format("{}##{:08X}", entry->label, entry->formID);
 
             for (const auto& [slot, id] : slots) {
                 if (id == entry->formID) {
@@ -1406,7 +1369,7 @@ namespace QAS::Audio
             g_entries.push_back(std::move(entry));
         }
 
-        // Opt-in: one runtime category per mod (and original parent).
+        // One runtime category per mod (and original parent category).
         g_modPlans.clear();
         if (modCategoriesEnabled) {
             PlanModCategories(dataHandler, modCategoriesMinSounds);
@@ -1569,26 +1532,17 @@ namespace QAS::Audio
 
     float ReadVolume(const Entry& a_entry)
     {
-        if (a_entry.category) {
-            // Root menu categories show their own (baseline) value while the
-            // global multiplier scales them. g_globalActive / baseline are
-            // written on the game thread; a stale read here costs one frame.
-            if (g_globalActive) {
-                for (const auto& root : g_roots) {
-                    if (root.category == a_entry.category) {
-                        return Clamp01(root.baseline);
-                    }
+        // Root menu categories show their own (baseline) value while the
+        // global multiplier scales them. g_globalActive / baseline are
+        // written on the game thread; a stale read here costs one frame.
+        if (g_globalActive) {
+            for (const auto& root : g_roots) {
+                if (root.category == a_entry.category) {
+                    return Clamp01(root.baseline);
                 }
             }
-            return Clamp01(a_entry.category->volumeMult);
         }
-        if (const auto* audio = RE::BSAudioManager::GetSingleton()) {
-            return Clamp01(audio->masterVolume);
-        }
-        if (const auto* setting = FindPref(kMasterSetting)) {
-            return Clamp01(setting->data.f);
-        }
-        return 1.0F;
+        return Clamp01(a_entry.category->volumeMult);
     }
 
     void Preview(std::size_t a_index, float a_volume)
@@ -1611,9 +1565,6 @@ namespace QAS::Audio
 
     float DefaultVolume(const Entry& a_entry)
     {
-        if (!a_entry.category) {
-            return 1.0F;
-        }
         // CommonLib's GetDefaultMenuValue() divides two integers; do it in float.
         const auto raw = a_entry.category->defaultMenuValue;
         return raw == 0 ? 1.0F : Clamp01(static_cast<float>(raw) / 65535.0F);
@@ -1658,10 +1609,6 @@ namespace QAS::Audio
             tasks->AddTask([a_index, volume]() {
                 auto& entry = *g_entries[a_index];
                 ApplyNow(entry, volume);
-                if (!entry.category) {
-                    WriteFloatPref("fAudioMasterVolume", volume);
-                    return;
-                }
                 // Plugin INI for every category, so the value follows the
                 // category even if a later load order moves it out of an
                 // engine slot. Restored only for categories without a slot.
@@ -1670,7 +1617,7 @@ namespace QAS::Audio
                     logs::info("Persisted [{}] {} = {:.4f} to '{}' ({})", kVolumesSection, key, volume,
                         g_pluginIniPath, ok ? "ok" : "FAILED");
                 }
-                if (entry.synthetic || entry.slot < 0 || entry.slot >= g_engineSlots) {
+                if (entry.synthetic || entry.slot >= g_engineSlots) {
                     return;  // no engine slot: the plugin INI is the only store
                 }
                 // Always write the uID line too: the engine re-assigns free

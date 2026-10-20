@@ -4,20 +4,20 @@ namespace QAS::Audio
 {
     struct Entry
     {
-        RE::BGSSoundCategory* category{ nullptr };  // nullptr = master volume
+        RE::BGSSoundCategory* category{ nullptr };  // set for every entry once initialized
         RE::FormID            formID{ 0 };
         std::string           editorID;
         std::string           label;     // display name (translated, overridden, or tidied)
         std::string           widgetID;  // unique ImGui label ("Label##formid")
         bool                  labelOverridden{ false };  // from [Labels] in the plugin INI: shown verbatim
         std::string           rawFullName;  // FULL as the record carries it ("$Effects"), for late translation
-        // Runtime-created per-mod category (opt-in, see [ModCategories]):
-        // no engine slot, persisted only in the plugin INI under persistKey,
-        // grouped under ownerFileName.
+        // Runtime-created per-mod category (see [ModCategories]): no engine
+        // slot, persisted only in the plugin INI under persistKey, grouped
+        // under ownerFileName.
         bool                  synthetic{ false };
         std::string           ownerFileName;
         std::string           persistKey;
-        int                   slot{ -1 };  // [AudioMenu] fVal<slot> / uID<slot>; -1 = master
+        int                   slot{ -1 };  // [AudioMenu] fVal<slot> / uID<slot>; -1 = none (synthetic)
         float                 uiVolume{ 1.0F };  // last value the UI pushed (render thread)
         std::atomic<bool>     pending{ false };  // a Preview() task is still queued
     };
@@ -30,7 +30,6 @@ namespace QAS::Audio
         std::string              label;     // "Vanilla Game" or the plugin name without extension
         std::string              fileName;  // defining plugin file ("" for the Vanilla group)
         std::string              author;    // TES4 header author, may be empty
-        std::string              widgetID;  // unique ImGui label
         bool                     vanilla{ false };
         bool                     misc{ false };  // "Sonstige Mods": mods with fewer than kMinGroupSize sliders
         std::vector<std::size_t> entries;        // indices into the entry list
@@ -61,7 +60,7 @@ namespace QAS::Audio
     // Live apply on the game thread (same call path as the Vanilla slider).
     void Preview(std::size_t a_index, float a_volume);
 
-    // Write the entry's current volume: master and engine-slot categories to
+    // Write the entry's current volume: engine-slot categories to
     // SkyrimPrefs.ini [AudioMenu], every category additionally to
     // Data/SKSE/Plugins/QuickAudioSliders.ini (the only store for categories
     // beyond the engine's eight slots; those are restored at kDataLoaded).
@@ -69,7 +68,7 @@ namespace QAS::Audio
 
     // The value a slider has without any user override: the SNCT record's
     // UNAM "default menu value" (what the engine initialises volumeMult
-    // from), 100% for the master and for a record that carries no UNAM.
+    // from), 100% for a record that carries no UNAM.
     [[nodiscard]] float DefaultVolume(const Entry& a_entry);
 
     // Reset one slider / every slider (and the global multiplier) to the

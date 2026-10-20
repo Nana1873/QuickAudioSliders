@@ -1,35 +1,12 @@
 #include "Translation.h"
 
+#include "StringConv.h"
+
 #include <SKSE/Translation.h>
 
 namespace
 {
     QAS::Translation::Strings g_strings;
-
-    std::wstring ToWide(std::string_view a_utf8)
-    {
-        if (a_utf8.empty()) {
-            return {};
-        }
-        const auto size = MultiByteToWideChar(CP_UTF8, 0, a_utf8.data(), static_cast<int>(a_utf8.size()), nullptr, 0);
-        std::wstring result(static_cast<std::size_t>(size), L'\0');
-        MultiByteToWideChar(CP_UTF8, 0, a_utf8.data(), static_cast<int>(a_utf8.size()), result.data(), size);
-        return result;
-    }
-
-    std::string ToUtf8(const wchar_t* a_wide)
-    {
-        if (!a_wide || !*a_wide) {
-            return {};
-        }
-        const auto size = WideCharToMultiByte(CP_UTF8, 0, a_wide, -1, nullptr, 0, nullptr, nullptr);
-        if (size <= 1) {
-            return {};
-        }
-        std::string result(static_cast<std::size_t>(size - 1), '\0');
-        WideCharToMultiByte(CP_UTF8, 0, a_wide, -1, result.data(), size, nullptr, nullptr);
-        return result;
-    }
 
     std::optional<std::string> Lookup(std::string_view a_key)
     {
@@ -58,13 +35,13 @@ namespace
             if (candidate.empty()) {
                 continue;
             }
-            const RE::BSFixedStringW key{ ToWide(candidate).c_str() };
+            const RE::BSFixedStringW key{ QAS::Text::ToWide(candidate).c_str() };
             const auto               it = map.find(key);
             if (it == map.end()) {
                 continue;
             }
-            auto translated = ToUtf8(it->second.c_str());
-            if (!translated.empty()) {
+            const auto* wide = it->second.c_str();
+            if (auto translated = wide ? QAS::Text::ToUtf8(wide) : std::string{}; !translated.empty()) {
                 return translated;
             }
         }
