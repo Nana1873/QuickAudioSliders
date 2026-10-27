@@ -38,17 +38,22 @@ namespace
     }
 
     // BSResourceNiBinaryStream so BSA-packed files resolve like loose ones.
-    std::uint32_t ReadLineW(RE::BSResourceNiBinaryStream& a_stream, wchar_t* a_dst, std::uint32_t a_dstLen)
+    std::uint32_t ReadLineW(RE::BSResourceNiBinaryStream& a_stream, wchar_t* a_dst, std::uint32_t a_dstLen, bool& a_eof)
     {
         wchar_t* iter = a_dst;
         if (a_dstLen == 0) {
+            a_eof = true;
             return 0;
         }
         for (std::uint32_t i = 0; i < a_dstLen - 1; ++i) {
             wchar_t       data = 0;
             std::uint64_t read = 0;
             a_stream.stream->DoRead(&data, sizeof(data), read);
-            if (read != sizeof(data) || data == L'\n') {
+            if (read != sizeof(data)) {
+                a_eof = true;
+                break;
+            }
+            if (data == L'\n') {
                 break;
             }
             *iter++ = data;
@@ -73,11 +78,12 @@ namespace
             return false;
         }
         std::size_t entries = 0;
-        while (true) {
+        bool        eof = false;
+        while (!eof) {
             wchar_t             buf[512];
-            const std::uint32_t rawLen = ReadLineW(fileStream, buf, static_cast<std::uint32_t>(std::size(buf)));
+            const std::uint32_t rawLen = ReadLineW(fileStream, buf, static_cast<std::uint32_t>(std::size(buf)), eof);
             if (rawLen == 0) {
-                break;
+                continue;  // blank line; EOF ends the loop via eof
             }
             std::uint32_t len = rawLen;
             if (buf[len - 1] == L'\r') {
