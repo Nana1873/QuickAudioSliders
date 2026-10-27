@@ -2,11 +2,104 @@
 
 #include "StringConv.h"
 
+#include <RE/B/BSResourceNiBinaryStream.h>
+#include <RE/I/INISettingCollection.h>
 #include <SKSE/Translation.h>
 
 namespace
 {
     QAS::Translation::Strings g_strings;
+
+    // The plugin's own translation table, filled by Import() from the
+    // Interface/Translations files it parses itself. QAS never writes into
+    // the engine's Scaleform translation table: SKSE::Translation::
+    // ParseTranslation inserts into BSScaleformTranslator's BSTScatterTable
+    // while InitTESThread may be rebuilding it, which intermittently crashed
+    // at startup (access violation in do_insert, crash-2026-10-27). Keys are
+    // stored as they appear in the files, '$' included; values are UTF-8.
+    // Written only during kDataLoaded (game thread) before g_ready publishes
+    // the slider containers; read-only afterwards.
+    std::unordered_map<std::string, std::string> g_table;
+
+    // The game's sLanguage:General setting, "ENGLISH" when unset.
+    std::string GameLanguage()
+    {
+        auto*       collection = RE::INISettingCollection::GetSingleton();
+        const auto* setting = collection ? collection->GetSetting("sLanguage:General") : nullptr;
+        if (setting && setting->GetType() == RE::Setting::Type::kString && setting->data.s && *setting->data.s) {
+            return setting->data.s;
+        }
+        return "ENGLISH";
+    }
+
+    // One UTF-16 LE code unit per read, '\n'-terminated lines, like the SKSE
+    // loader reads these files. Goes through BSResourceNiBinaryStream so BSA-
+    // packed translation files resolve the same way loose ones do.
+    std::uint32_t ReadLineW(RE::BSResourceNiBinaryStream& a_stream, wchar_t* a_dst, std::uint32_t a_dstLen)
+    {
+        wchar_t* iter = a_dst;
+        if (a_dstLen == 0) {
+            return 0;
+        }
+        for (std::uint32_t i = 0; i < a_dstLen - 1; ++i) {
+            wchar_t       data = 0;
+            std::uint64_t read = 0;
+            a_stream.stream->DoRead(&data, sizeof(data), read);
+            if (read != sizeof(data) || data == L'\n') {
+                break;
+            }
+            *iter++ = data;
+        }
+        *iter = 0;
+        return static_cast<std::uint32_t>(iter - a_dst);
+    }
+
+    bool ParseFile(const std::string& a_path)
+    {
+        RE::BSResourceNiBinaryStream fileStream{ a_path };
+        if (!fileStream.good()) {
+            return false;
+        }
+        std::uint16_t bom = 0;
+        std::uint64_t read = 0;
+        fileStream.stream->DoRead(&bom, sizeof(bom), read);
+        if (read != sizeof(bom) || bom != 0xFEFF) {
+            logs::warn("{}: missing UTF-16 LE BOM; file skipped", a_path);
+            return true;  // the file exists; do not fall back to another language
+        }
+        std::size_t entries = 0;
+        while (true) {
+            wchar_t             buf[512];
+            const std::uint32_t rawLen = ReadLineW(fileStream, buf, static_cast<std::uint32_t>(std::size(buf)));
+            if (rawLen == 0) {
+                break;
+            }
+            std::uint32_t len = rawLen;
+            if (buf[len - 1] == L'\r') {
+                buf[--len] = 0;
+            }
+            if (len < 4 || buf[0] != L'$') {
+                continue;
+            }
+            std::uint32_t delim = 0;
+            for (std::uint32_t i = 0; i < len; ++i) {
+                if (buf[i] == L'\t') {
+                    delim = i;
+                }
+            }
+            if (delim < 2) {
+                continue;
+            }
+            buf[delim] = 0;
+            auto key = QAS::Text::ToUtf8(buf);
+            auto value = QAS::Text::ToUtf8(&buf[delim + 1]);
+            if (!key.empty() && !value.empty() && g_table.emplace(std::move(key), std::move(value)).second) {
+                ++entries;
+            }
+        }
+        logs::info("{}: {} translation(s) imported", a_path, entries);
+        return true;
+    }
 
     // The printf argument signature of a format string: every conversion
     // specifier's length modifiers and final character plus any '*'
@@ -60,7 +153,13 @@ namespace
 
     std::optional<std::string> Lookup(std::string_view a_key)
     {
-        // The canonical path first: the translator's virtual Translate(),
+        // The plugin's own table first: our UI strings and the translation
+        // files of category-owning mods, imported by Import().
+        if (const auto it = g_table.find(std::string(a_key)); it != g_table.end()) {
+            return it->second;
+        }
+
+        // Then the translator's virtual Translate(),
         // exactly what Scaleform calls for "$Key" strings in menus. It
         // covers the engine's own table (interface/translate_<lang>.txt),
         // which is not necessarily visible in translationMap.
@@ -101,6 +200,15 @@ namespace
 
 namespace QAS::Translation
 {
+    void Import(std::string_view a_name)
+    {
+        const auto language = GameLanguage();
+        const auto path = std::format("Interface\\Translations\\{}_{}.txt", a_name, language);
+        if (!ParseFile(path) && language != "ENGLISH") {
+            ParseFile(std::format("Interface\\Translations\\{}_ENGLISH.txt", a_name));
+        }
+    }
+
     std::string Translate(std::string_view a_key, std::string_view a_fallback)
     {
         if (a_key.empty() || a_key.front() != '$') {

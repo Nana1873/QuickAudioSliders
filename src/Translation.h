@@ -2,16 +2,23 @@
 
 namespace QAS::Translation
 {
-    // Resolves a Scaleform translation key such as "$Effects" through the
-    // game's own translator (the strings the Vanilla audio menu shows).
-    // Falls back to a_fallback when given, else to the key without its
-    // leading '$'.
+    // Parses Interface/Translations/<a_name>_<sLanguage>.txt (ENGLISH as
+    // fallback) into the plugin's own table. QAS reads these files itself
+    // and never writes into the engine's Scaleform translation table, whose
+    // concurrent rebuild on InitTESThread made such writes crash at startup.
+    // Game thread only, during kDataLoaded.
+    void Import(std::string_view a_name);
+
+    // Resolves a Scaleform translation key such as "$Effects": first the
+    // plugin's own table (see Import), then read-only through the game's
+    // translator (the strings the Vanilla audio menu shows). Falls back to
+    // a_fallback when given, else to the key without its leading '$'.
     std::string Translate(std::string_view a_key, std::string_view a_fallback = {});
 
     // The plugin's own UI strings. English defaults live here; a
     // Data/Interface/Translations/QuickAudioSliders_<LANGUAGE>.txt file
-    // overrides them (SKSE::Translation::ParseTranslation, loaded at
-    // kDataLoaded). Resolved once by LoadStrings().
+    // overrides them (parsed by Import at kDataLoaded). Resolved once by
+    // LoadStrings().
     struct Strings
     {
         std::string globalHeading = "Global";

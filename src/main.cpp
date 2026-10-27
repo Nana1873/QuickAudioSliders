@@ -2,7 +2,6 @@
 #include "MenuIntegration.h"
 #include "Translation.h"
 
-#include <SKSE/Translation.h>
 #include <spdlog/sinks/basic_file_sink.h>
 
 namespace
@@ -32,7 +31,7 @@ namespace
         case SKSE::MessagingInterface::kDataLoaded:
             // Data/Interface/Translations/QuickAudioSliders_<LANGUAGE>.txt
             // (English defaults are compiled in; German ships alongside).
-            SKSE::Translation::ParseTranslation("QuickAudioSliders");
+            QAS::Translation::Import("QuickAudioSliders");
             QAS::Translation::LoadStrings();
             QAS::Audio::Initialize();
             break;

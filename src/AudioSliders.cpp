@@ -1346,7 +1346,7 @@ namespace QAS::Audio
             entry->formID = category->GetFormID();
             const char* editorID = category->GetFormEditorID();
             entry->editorID = editorID ? editorID : "";
-            // Make sure the owning mod's translation file is in the table
+            // Import the owning mod's translation file into our own table
             // before resolving its "$Keys" (SKSE does not import them for
             // every plugin by itself; AOS's "$AOS_Ambience" was missing).
             if (const auto* owner = OwningModFile(*category)) {
@@ -1354,7 +1354,7 @@ namespace QAS::Audio
                 if (std::none_of(parsedTranslations.begin(), parsedTranslations.end(),
                         [&](const std::string& a_name) { return EqualsNoCase(a_name, ownerName); })) {
                     parsedTranslations.push_back(ownerName);
-                    SKSE::Translation::ParseTranslation(StripExtension(ownerName));
+                    Translation::Import(StripExtension(ownerName));
                 }
             }
             const char* fullName = category->GetFullName();

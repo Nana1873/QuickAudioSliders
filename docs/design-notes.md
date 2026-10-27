@@ -485,3 +485,20 @@ first-write header; if the file disappeared since startup it simply calls
 `EnsurePluginIni()` before the Win32 profile write (the previous session's
 attempt to template this path produced syntax errors - kept minimal on
 purpose).
+
+## Startup crash fix: self-parsed translations (2026-10-27)
+
+Intermittent access violation at startup (crash-2026-10-27-12-09-19):
+`SKSE::Translation::ParseTranslation` inserts into the BSScaleformTranslator
+BSTScatterTable while InitTESThread may still be rebuilding it (r14 = 0 in
+do_insert; the 01:20 log shows 0xDEADBEEF, freed memory). Load-order timing
+dependent; surfaced after LoreBox shifted load times.
+
+Fix: QAS no longer writes into the engine translation table at all.
+`QAS::Translation::Import` parses the `Interface/Translations/<name>_<lang>.txt`
+files itself (UTF-16 LE BOM, `$Key<TAB>Value`, via BSResourceNiBinaryStream so
+BSA-packed files resolve too; sLanguage with ENGLISH fallback) into a plugin-own
+table, filled on the game thread during kDataLoaded before g_ready publishes.
+Lookup order: own table, then the translator's virtual Translate (read-only),
+then the raw translationMap scan. Both former ParseTranslation call sites
+(main.cpp kDataLoaded, AudioSliders owner-mod import) now call Import.
