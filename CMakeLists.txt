@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.21)
-project(QuickAudioSliders VERSION 1.0.0 LANGUAGES CXX)
+project(QuickAudioSliders VERSION 1.0.1 LANGUAGES CXX)
 
 set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>DLL")
 set(BUILD_TESTS OFF CACHE BOOL "" FORCE)
