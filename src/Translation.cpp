@@ -13,8 +13,19 @@ namespace
     // Our own table for the files Import() parses. Never insert into the
     // engine's Scaleform table: InitTESThread may be rebuilding it, which
     // intermittently crashed startup (see design-notes, 2026-10-27).
-    // Written only at kDataLoaded, read-only afterwards.
+    // Written only at kDataLoaded, read-only afterwards. Keys are stored
+    // lowercased: the engine table this replaces matched case-insensitively
+    // (interned BSFixedStringW), and mod files rely on that.
     std::unordered_map<std::string, std::string> g_table;
+
+    std::string LowerKey(std::string_view a_key)
+    {
+        auto wide = QAS::Text::ToWide(a_key);
+        if (!wide.empty()) {
+            ::CharLowerBuffW(wide.data(), static_cast<DWORD>(wide.size()));
+        }
+        return QAS::Text::ToUtf8(wide);
+    }
 
     std::string GameLanguage()
     {
@@ -83,6 +94,7 @@ namespace
                 continue;
             }
             buf[delim] = 0;
+            ::CharLowerBuffW(buf, delim);
             auto key = QAS::Text::ToUtf8(buf);
             auto value = QAS::Text::ToUtf8(&buf[delim + 1]);
             if (!key.empty() && !value.empty() && g_table.emplace(std::move(key), std::move(value)).second) {
@@ -145,7 +157,7 @@ namespace
 
     std::optional<std::string> Lookup(std::string_view a_key)
     {
-        if (const auto it = g_table.find(std::string(a_key)); it != g_table.end()) {
+        if (const auto it = g_table.find(LowerKey(a_key)); it != g_table.end()) {
             return it->second;
         }
 
