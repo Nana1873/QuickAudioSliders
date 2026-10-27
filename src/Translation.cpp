@@ -10,18 +10,12 @@ namespace
 {
     QAS::Translation::Strings g_strings;
 
-    // The plugin's own translation table, filled by Import() from the
-    // Interface/Translations files it parses itself. QAS never writes into
-    // the engine's Scaleform translation table: SKSE::Translation::
-    // ParseTranslation inserts into BSScaleformTranslator's BSTScatterTable
-    // while InitTESThread may be rebuilding it, which intermittently crashed
-    // at startup (access violation in do_insert, crash-2026-10-27). Keys are
-    // stored as they appear in the files, '$' included; values are UTF-8.
-    // Written only during kDataLoaded (game thread) before g_ready publishes
-    // the slider containers; read-only afterwards.
+    // Our own table for the files Import() parses. Never insert into the
+    // engine's Scaleform table: InitTESThread may be rebuilding it, which
+    // intermittently crashed startup (see design-notes, 2026-10-27).
+    // Written only at kDataLoaded, read-only afterwards.
     std::unordered_map<std::string, std::string> g_table;
 
-    // The game's sLanguage:General setting, "ENGLISH" when unset.
     std::string GameLanguage()
     {
         auto*       collection = RE::INISettingCollection::GetSingleton();
@@ -32,9 +26,7 @@ namespace
         return "ENGLISH";
     }
 
-    // One UTF-16 LE code unit per read, '\n'-terminated lines, like the SKSE
-    // loader reads these files. Goes through BSResourceNiBinaryStream so BSA-
-    // packed translation files resolve the same way loose ones do.
+    // BSResourceNiBinaryStream so BSA-packed files resolve like loose ones.
     std::uint32_t ReadLineW(RE::BSResourceNiBinaryStream& a_stream, wchar_t* a_dst, std::uint32_t a_dstLen)
     {
         wchar_t* iter = a_dst;
@@ -153,8 +145,6 @@ namespace
 
     std::optional<std::string> Lookup(std::string_view a_key)
     {
-        // The plugin's own table first: our UI strings and the translation
-        // files of category-owning mods, imported by Import().
         if (const auto it = g_table.find(std::string(a_key)); it != g_table.end()) {
             return it->second;
         }

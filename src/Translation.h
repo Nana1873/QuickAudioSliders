@@ -3,10 +3,9 @@
 namespace QAS::Translation
 {
     // Parses Interface/Translations/<a_name>_<sLanguage>.txt (ENGLISH as
-    // fallback) into the plugin's own table. QAS reads these files itself
-    // and never writes into the engine's Scaleform translation table, whose
-    // concurrent rebuild on InitTESThread made such writes crash at startup.
-    // Game thread only, during kDataLoaded.
+    // fallback) into the plugin's own table; the engine's translation table
+    // is never written (startup crash, see design-notes 2026-10-27). Game
+    // thread only, during kDataLoaded.
     void Import(std::string_view a_name);
 
     // Resolves a Scaleform translation key such as "$Effects": first the
