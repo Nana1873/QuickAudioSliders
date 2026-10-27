@@ -67,8 +67,10 @@ namespace
         std::uint64_t read = 0;
         fileStream.stream->DoRead(&bom, sizeof(bom), read);
         if (read != sizeof(bom) || bom != 0xFEFF) {
+            // Empty or not UTF-16 LE (a common packaging mistake); treat it
+            // as absent so Import() can fall back to the ENGLISH file.
             logs::warn("{}: missing UTF-16 LE BOM; file skipped", a_path);
-            return true;  // the file exists; do not fall back to another language
+            return false;
         }
         std::size_t entries = 0;
         while (true) {
