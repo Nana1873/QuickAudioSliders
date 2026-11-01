@@ -97,7 +97,11 @@ sound category per such mod (at least `MinSounds` descriptors, default 3) and
 shows it on the "Extra Sliders" page. Nothing is written to disk or to save games;
 engine-managed categories and Sound Record Distributor assignments are left
 alone, and mods that already have a slider on the Volume page are not
-duplicated. Opt out with `[ModCategories] Enabled=0` in
+duplicated. Mod-defined categories without the menu flag (left off by the
+mod, or removed by a patch such as Volume Sliders for Weather's Cathedral
+patch) also get a slider there when sounds still use them, even for mods that
+have Volume sliders, with the same `MinSounds` / `Exclude` rules. Opt out with
+`[ModCategories] Enabled=0` in
 `QuickAudioSliders.ini` (the "Extra Sliders" page then disappears after a restart),
 or keep single mods off the page with `Exclude=Some Mod.esp,Other.esp`.
 
