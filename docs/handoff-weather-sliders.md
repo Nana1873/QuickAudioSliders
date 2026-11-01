@@ -41,6 +41,22 @@ form factory, 0xFF FormID, `kShouldAppearOnMenu` reset, re-pointed one frame
 after kDataLoaded), but grouped by weather sound type instead of by mod.
 Works for any weather mod, no ESP, save-neutral.
 
+Standalone: needs only Quick Audio Sliders plus whatever weather mod is
+loaded. Volume Sliders for Weather (VSfW) is NOT required. The skip rules
+below only make sure the two coexist when both are installed:
+
+- Without VSfW: weather SNDRs hang on Vanilla categories, we re-point them
+  and the weather sliders appear.
+- With VSfW and a matching patch: its ESP already moved those SNDRs to its
+  own menu-flagged SNCTs, which show on the Volume page anyway. We skip them
+  (no duplicate sliders, no fight over the same descriptors).
+- With VSfW but no patch for the weather mod (the reporter's case, CW
+  Unofficial Update): VSfW misses those SNDRs, they still hang on Vanilla
+  categories, and we take them over as in the first case.
+
+AOS works the same way: a category AOS has taken over with its own slider
+is left alone.
+
 1. At kDataLoaded, iterate `GetFormArray<RE::TESWeather>()` and its sound list
    (`TESWeather::sounds`, entries with a sound FormID + type
    Default / Precip / Wind / Thunder; verify the exact struct and enum names in
