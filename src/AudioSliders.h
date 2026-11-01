@@ -18,10 +18,9 @@ namespace QAS::Audio
         bool                  labelPendingTranslation{ false };
         std::string           labelModFile;  // mod file used for label cosmetics ("" = none)
         bool                  labelPooled{ false };  // label carries the pooled "Other Mods" form
-        // "Extra Sliders" entry (see [ModCategories]): a runtime-created
-        // per-mod category, or a mod's own category without the menu flag.
-        // No engine slot, persisted only in the plugin INI under persistKey,
-        // grouped under ownerFileName.
+        // Runtime-created per-mod category (see [ModCategories]): no engine
+        // slot, persisted only in the plugin INI under persistKey, grouped
+        // under ownerFileName.
         bool                  synthetic{ false };
         std::string           ownerFileName;
         std::string           persistKey;

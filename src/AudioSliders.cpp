@@ -376,9 +376,7 @@ namespace
 
         for (std::size_t index = 0; index < g_entries.size(); ++index) {
             const auto& entry = *g_entries[index];
-            // Runtime-created categories have no file, so this is nullptr for
-            // them; a mod's unlisted category still yields its author.
-            const auto* file = entry.category ? OwningModFile(*entry.category) : nullptr;
+            const auto* file = (entry.category && !entry.synthetic) ? OwningModFile(*entry.category) : nullptr;
             const auto  fileName = entry.synthetic ? entry.ownerFileName : (file ? std::string(file->GetFilename()) : std::string());
 
             if (fileName.empty()) {
@@ -400,12 +398,6 @@ namespace
                 QAS::Audio::Group group;
                 group.fileName = fileName;
                 group.label = StripExtension(fileName);
-                // Volume Sliders for Weather defines its categories in
-                // "... - Vanilla.esp" even with a weather-mod patch installed;
-                // the file name would read as "Vanilla only".
-                if (EqualsNoCase(fileName, "Volume Sliders for Weather - Vanilla.esp"sv)) {
-                    group.label = "Volume Sliders for Weather";
-                }
                 // "DEFAULT" is the Creation Kit's placeholder author; hide it.
                 if (file) {
                     if (const char* author = file->createdBy.c_str();
@@ -421,28 +413,24 @@ namespace
 
         // Mods with fewer than kMinGroupSize sliders are pooled into one
         // collapsed group; their sliders get a "<mod>: " prefix so the origin
-        // stays visible. Counted per page: a mod with one Volume slider and
-        // one Extra slider would otherwise get a one-slider heading on each.
+        // stays visible.
         QAS::Audio::Group misc;
         misc.label = QAS::Translation::S().otherMods;
         misc.misc = true;
         for (auto it = std::next(g_groups.begin()); it != g_groups.end();) {
-            const auto extra = static_cast<std::size_t>(std::count_if(it->entries.begin(), it->entries.end(),
-                [](std::size_t a_index) { return g_entries[a_index]->synthetic; }));
-            const auto menu = it->entries.size() - extra;
-            std::erase_if(it->entries, [&](std::size_t a_index) {
-                auto& entry = *g_entries[a_index];
-                if ((entry.synthetic ? extra : menu) >= QAS::Audio::kMinGroupSize) {
-                    return false;
-                }
+            if (it->entries.size() >= QAS::Audio::kMinGroupSize) {
+                ++it;
+                continue;
+            }
+            for (const auto index : it->entries) {
+                auto& entry = *g_entries[index];
                 if (!entry.labelOverridden) {
                     entry.label = PooledLabel(it->fileName, entry.label);
                     entry.labelPooled = true;
                 }
-                misc.entries.push_back(a_index);
-                return true;
-            });
-            it = it->entries.empty() ? g_groups.erase(it) : std::next(it);
+                misc.entries.push_back(index);
+            }
+            it = g_groups.erase(it);
         }
 
         // Display tidy-up and final widget IDs for every slider.
@@ -629,8 +617,7 @@ namespace
             "; run through Vanilla sound categories (Effects, Ambience, ...). The plugin\n"
             "; creates one in-memory sound category per mod at startup; nothing is written\n"
             "; to disk or into save games, and mods that already own a menu slider are\n"
-            "; skipped. Sound categories a mod defines without a menu slider (e.g.\n"
-            "; Cathedral Weathers' Rain / Thunder) get an Extra slider of their own too."sv,
+            "; skipped."sv,
             kModCategoriesKeys, std::size(kModCategoriesKeys) },
         { "Labels"sv,
             "[Labels]\n"
@@ -837,51 +824,6 @@ namespace
             return {};
         }
         return std::format("{}|{:06X}", fileName, a_entry.category->GetLocalFormID());
-    }
-
-    std::vector<std::string> g_importedTranslations;  // owner plugins whose translation file was imported
-
-    // Editor ID, FULL and display label of a slider entry whose category,
-    // formID and (for synthetic entries) persistKey are set. Imports the
-    // owning mod's translation file into our own table before resolving its
-    // "$Keys" (SKSE does not import them for every plugin by itself; AOS's
-    // "$AOS_Ambience" was missing); a "$Key" that misses is retried on the
-    // first render. [Labels] <plugin>|<local FormID> in the plugin INI (same
-    // key as the volume store) overrides the label.
-    void InitEntryLabel(QAS::Audio::Entry& a_entry)
-    {
-        auto*       category = a_entry.category;
-        const char* editorID = category->GetFormEditorID();
-        a_entry.editorID = editorID ? editorID : "";
-        if (const auto* owner = OwningModFile(*category)) {
-            const std::string ownerName{ owner->GetFilename() };
-            if (std::none_of(g_importedTranslations.begin(), g_importedTranslations.end(),
-                    [&](const std::string& a_name) { return EqualsNoCase(a_name, ownerName); })) {
-                g_importedTranslations.push_back(ownerName);
-                QAS::Translation::Import(StripExtension(ownerName));
-            }
-        }
-        const char* fullName = category->GetFullName();
-        a_entry.rawFullName = fullName ? fullName : "";
-        a_entry.label = QAS::Translation::Translate(fullName && *fullName ? fullName : a_entry.editorID);
-        if (a_entry.label.empty()) {
-            a_entry.label = std::format("{:08X}", a_entry.formID);
-        }
-        a_entry.labelPendingTranslation =
-            a_entry.rawFullName.starts_with('$') && a_entry.label == a_entry.rawFullName.substr(1);
-        if (a_entry.rawFullName.starts_with('$')) {
-            logs::info("Label for {:08X}: FULL '{}' -> '{}'{}", a_entry.formID, a_entry.rawFullName, a_entry.label,
-                a_entry.labelPendingTranslation ? " (no translation found yet)" : "");
-        }
-        if (const auto key = PluginIniKey(a_entry); !key.empty() && !g_pluginIniPath.empty()) {
-            char buffer[128]{};
-            GetPrivateProfileStringA(kLabelsSection, key.c_str(), "", buffer, sizeof(buffer), g_pluginIniPath.c_str());
-            if (buffer[0] != '\0') {
-                a_entry.label = buffer;
-                a_entry.labelOverridden = true;
-                logs::info("Label override for {}: '{}'", key, a_entry.label);
-            }
-        }
     }
 
     std::optional<float> ReadPluginVolume(const std::string& a_key)
@@ -1109,14 +1051,6 @@ namespace
         return result;
     }
 
-    // a_excludes: lower-cased patterns from ReadExcludeList().
-    bool IsExcluded(const std::vector<std::string>& a_excludes, std::string_view a_plugin)
-    {
-        const auto lower = LowerCopy(a_plugin);
-        return std::any_of(a_excludes.begin(), a_excludes.end(),
-            [&](const std::string& a_pattern) { return lower.find(a_pattern) != std::string::npos; });
-    }
-
     // Plans one runtime category per (mod plugin, original parent category)
     // for descriptors from non-official plugins that hang on Vanilla-defined
     // categories, when the mod has at least a_minSounds such descriptors.
@@ -1150,7 +1084,11 @@ namespace
             return std::any_of(ownersWithSliders.begin(), ownersWithSliders.end(),
                 [&](const std::string& a_owner) { return EqualsNoCase(a_owner, a_plugin); });
         };
-        auto excluded = [&](std::string_view a_plugin) { return IsExcluded(excludes, a_plugin); };
+        auto excluded = [&](std::string_view a_plugin) {
+            const auto lower = LowerCopy(a_plugin);
+            return std::any_of(excludes.begin(), excludes.end(),
+                [&](const std::string& a_pattern) { return lower.find(a_pattern) != std::string::npos; });
+        };
 
         std::size_t skippedEngine = 0, skippedSrd = 0, skippedModOwned = 0, skippedHasSlider = 0, skippedExcluded = 0;
         for (auto* form : a_dataHandler->GetFormArray<RE::BGSSoundDescriptorForm>()) {
@@ -1231,63 +1169,6 @@ namespace
         logs::info("Mod categories: {} plan(s) (skipped descriptors: {} of mods with own slider, {} excluded, "
                    "{} engine-managed, {} SRD-assigned, {} on mod-owned categories)",
             g_modPlans.size(), skippedHasSlider, skippedExcluded, skippedEngine, skippedSrd, skippedModOwned);
-    }
-
-    // Sound categories a mod defines without the "Should appear on menu"
-    // flag (Cathedral Weathers' Rain / Thunder / Interior Rain): the mod's
-    // own sounds hang on them, so the runtime per-mod categories above skip
-    // them as "mod-owned", yet no menu shows a slider for them. They get an
-    // "Extra Sliders" entry that drives the existing category directly; no
-    // descriptor is re-pointed. Same thresholds as the runtime categories:
-    // at least a_minSounds descriptors on the category itself, not
-    // engine-managed, plugin not excluded.
-    void AddUnlistedModCategories(RE::TESDataHandler* a_dataHandler, int a_minSounds)
-    {
-        std::unordered_map<RE::BGSSoundCategory*, std::size_t> descriptorCounts;
-        for (auto* form : a_dataHandler->GetFormArray<RE::BGSSoundDescriptorForm>()) {
-            if (form && form->soundDescriptor && form->soundDescriptor->category) {
-                ++descriptorCounts[form->soundDescriptor->category];
-            }
-        }
-        const auto excludes = ReadExcludeList();
-
-        std::size_t added = 0;
-        for (auto* category : a_dataHandler->GetFormArray<RE::BGSSoundCategory>()) {
-            if (!category || category->IsMenuCategory()) {
-                continue;
-            }
-            const auto* files = category->sourceFiles.array;
-            const auto* definer = (files && !files->empty()) ? files->front() : nullptr;
-            if (!definer || IsVanillaFile(definer->GetFilename())) {
-                continue;
-            }
-            const std::string pluginFile{ definer->GetFilename() };
-            const char*       editorID = category->GetFormEditorID();
-            const char*       fullName = category->GetFullName();
-            if (IsEngineManagedCategory(editorID ? editorID : ""sv) || IsEngineManagedCategory(fullName ? fullName : ""sv)) {
-                continue;
-            }
-            const auto count = descriptorCounts[category];
-            if (count < static_cast<std::size_t>(std::max(a_minSounds, 1))) {
-                continue;
-            }
-            if (IsExcluded(excludes, pluginFile)) {
-                continue;
-            }
-
-            auto entry = std::make_unique<QAS::Audio::Entry>();
-            entry->category = category;
-            entry->formID = category->GetFormID();
-            entry->synthetic = true;  // "Extra Sliders" page, persisted in the plugin INI
-            entry->ownerFileName = pluginFile;
-            entry->persistKey = std::format("{}|{:06X}", pluginFile, category->GetLocalFormID());
-            InitEntryLabel(*entry);
-            logs::info("Unlisted mod category {:08X} '{}' of '{}' ({} descriptor(s), no menu flag): Extra slider, key '{}'",
-                entry->formID, entry->label, pluginFile, count, entry->persistKey);
-            g_entries.push_back(std::move(entry));
-            ++added;
-        }
-        logs::info("Unlisted mod categories: {} Extra slider(s)", added);
     }
 
     // Creates the dynamic BGSSoundCategory forms (0xFF FormIDs, never saved)
@@ -1455,7 +1336,7 @@ namespace QAS::Audio
             return;
         }
 
-        g_importedTranslations.clear();
+        std::vector<std::string> parsedTranslations;
         for (auto* category : dataHandler->GetFormArray<RE::BGSSoundCategory>()) {
             if (!category || !category->IsMenuCategory()) {
                 continue;
@@ -1463,7 +1344,42 @@ namespace QAS::Audio
             auto entry = std::make_unique<Entry>();
             entry->category = category;
             entry->formID = category->GetFormID();
-            InitEntryLabel(*entry);
+            const char* editorID = category->GetFormEditorID();
+            entry->editorID = editorID ? editorID : "";
+            // Import the owning mod's translation file into our own table
+            // before resolving its "$Keys" (SKSE does not import them for
+            // every plugin by itself; AOS's "$AOS_Ambience" was missing).
+            if (const auto* owner = OwningModFile(*category)) {
+                const std::string ownerName{ owner->GetFilename() };
+                if (std::none_of(parsedTranslations.begin(), parsedTranslations.end(),
+                        [&](const std::string& a_name) { return EqualsNoCase(a_name, ownerName); })) {
+                    parsedTranslations.push_back(ownerName);
+                    Translation::Import(StripExtension(ownerName));
+                }
+            }
+            const char* fullName = category->GetFullName();
+            entry->rawFullName = fullName ? fullName : "";
+            entry->label = Translation::Translate(fullName && *fullName ? fullName : entry->editorID);
+            if (entry->label.empty()) {
+                entry->label = std::format("{:08X}", entry->formID);
+            }
+            entry->labelPendingTranslation =
+                entry->rawFullName.starts_with('$') && entry->label == entry->rawFullName.substr(1);
+            if (entry->rawFullName.starts_with('$')) {
+                logs::info("Label for {:08X}: FULL '{}' -> '{}'{}", entry->formID, entry->rawFullName, entry->label,
+                    entry->labelPendingTranslation ? " (no translation found yet)" : "");
+            }
+            // User override: [Labels] <plugin>|<local FormID> = Display name
+            // in the plugin INI (same key as the volume store).
+            if (const auto key = PluginIniKey(*entry); !key.empty() && !g_pluginIniPath.empty()) {
+                char buffer[128]{};
+                GetPrivateProfileStringA(kLabelsSection, key.c_str(), "", buffer, sizeof(buffer), g_pluginIniPath.c_str());
+                if (buffer[0] != '\0') {
+                    entry->label = buffer;
+                    entry->labelOverridden = true;
+                    logs::info("Label override for {}: '{}'", key, entry->label);
+                }
+            }
 
             for (const auto& [slot, id] : slots) {
                 if (id == entry->formID) {
@@ -1490,7 +1406,6 @@ namespace QAS::Audio
         // One runtime category per mod (and original parent category).
         g_modPlans.clear();
         if (modCategoriesEnabled) {
-            AddUnlistedModCategories(dataHandler, modCategoriesMinSounds);
             PlanModCategories(dataHandler, modCategoriesMinSounds);
             CreateModCategories();
         }
@@ -1600,7 +1515,7 @@ namespace QAS::Audio
     {
         std::size_t changed = 0;
         for (auto& entry : g_entries) {
-            if (!entry->labelPendingTranslation || entry->labelOverridden) {
+            if (!entry->labelPendingTranslation || entry->labelOverridden || entry->synthetic) {
                 continue;
             }
             auto newLabel = Translation::Translate(entry->rawFullName);
