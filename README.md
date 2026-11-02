@@ -1,6 +1,6 @@
 # Quick Audio Sliders
 
-**Version 1.0.2**
+**Version 1.0.3**
 
 SKSE plugin for Skyrim SE/AE: an in-game volume panel rendered through
 [SKSE Menu Framework](https://www.nexusmods.com/skyrimspecialedition/mods/120352).
@@ -100,7 +100,8 @@ alone, and mods that already have a slider on the Volume page are not
 duplicated. Mod-defined categories without the menu flag (left off by the
 mod, or removed by a patch such as Volume Sliders for Weather's Cathedral
 patch) also get a slider there when sounds still use them, even for mods that
-have Volume sliders, with the same `MinSounds` / `Exclude` rules. Opt out with
+have Volume sliders, as soon as one sound uses them (`Exclude` applies,
+`MinSounds` does not). Opt out with
 `[ModCategories] Enabled=0` in
 `QuickAudioSliders.ini` (the "Extra Sliders" page then disappears after a restart),
 or keep single mods off the page with `Exclude=Some Mod.esp,Other.esp`.

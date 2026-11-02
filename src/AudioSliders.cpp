@@ -1239,10 +1239,13 @@ namespace
     // them, so the runtime per-mod categories above skip them as
     // "mod-owned", yet no menu shows a slider for them. They get an
     // "Extra Sliders" entry that drives the existing category directly; no
-    // descriptor is re-pointed. Same thresholds as the runtime categories:
-    // at least a_minSounds descriptors on the category itself, not
-    // engine-managed, plugin not excluded.
-    void AddUnlistedModCategories(RE::TESDataHandler* a_dataHandler, int a_minSounds)
+    // descriptor is re-pointed. Needed: at least one descriptor on the
+    // category itself, not engine-managed, plugin not excluded. MinSounds
+    // does not apply: it keeps runtime categories from splitting off stray
+    // sounds, but a category the mod made on purpose can carry a single,
+    // important one (Cathedral Weathers Unofficial Update plays its main rain
+    // through the one descriptor left on the hidden "Interior Rain").
+    void AddUnlistedModCategories(RE::TESDataHandler* a_dataHandler)
     {
         std::unordered_map<RE::BGSSoundCategory*, std::size_t> descriptorCounts;
         for (auto* form : a_dataHandler->GetFormArray<RE::BGSSoundDescriptorForm>()) {
@@ -1269,8 +1272,8 @@ namespace
                 continue;
             }
             const auto count = descriptorCounts[category];
-            if (count < static_cast<std::size_t>(std::max(a_minSounds, 1))) {
-                continue;
+            if (count == 0) {
+                continue;  // unused, or only a parent of other categories
             }
             if (IsExcluded(excludes, pluginFile)) {
                 continue;
@@ -1491,7 +1494,7 @@ namespace QAS::Audio
         // One runtime category per mod (and original parent category).
         g_modPlans.clear();
         if (modCategoriesEnabled) {
-            AddUnlistedModCategories(dataHandler, modCategoriesMinSounds);
+            AddUnlistedModCategories(dataHandler);
             PlanModCategories(dataHandler, modCategoriesMinSounds);
             CreateModCategories();
         }

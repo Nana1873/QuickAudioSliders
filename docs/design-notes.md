@@ -552,3 +552,15 @@ Lab load order: one new slider, ISC's "Weapons (ISC)" (197 descriptors).
 In-game run 13:53 clean (two earlier runs crashed in Community Shaders
 raytracing / AltTabFix input polling while the user was using the PC; QAS not
 on either stack).
+
+Follow-up 2026-11-02 (phbd01 on 1.0.2: "no extra weather sliders"). Reproduced
+in the lab instance AE-1.6.1170 with Cathedral Weathers 2.23c, VSfW 2.9.0
+(base + Cathedral patch) and Cathedral Weathers Unofficial Update 2.58
+(`Cathedral Weather Godrays.esp`, loaded after the VSfW patch): "Unlisted mod
+categories: 0". The Unofficial Update overrides 100 WTHR records and exactly
+one SNDR, `Cathedral_Rain_Interior_LP` (099AD4), back onto Cathedral's hidden
+"Interior Rain" category; its WTHRs use that descriptor as the precipitation
+sound in 13 weathers, i.e. it is the main rain. Thunder and the other rain
+descriptor stay on VSfW's categories via the patch. One descriptor was below
+`MinSounds` (3), so no slider. Fix: unlisted mod categories need only one
+descriptor; `MinSounds` keeps applying to runtime categories only.
