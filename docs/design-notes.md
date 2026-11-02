@@ -559,8 +559,22 @@ in the lab instance AE-1.6.1170 with Cathedral Weathers 2.23c, VSfW 2.9.0
 (`Cathedral Weather Godrays.esp`, loaded after the VSfW patch): "Unlisted mod
 categories: 0". The Unofficial Update overrides 100 WTHR records and exactly
 one SNDR, `Cathedral_Rain_Interior_LP` (099AD4), back onto Cathedral's hidden
-"Interior Rain" category; its WTHRs use that descriptor as the precipitation
-sound in 13 weathers, i.e. it is the main rain. Thunder and the other rain
-descriptor stay on VSfW's categories via the patch. One descriptor was below
-`MinSounds` (3), so no slider. Fix: unlisted mod categories need only one
-descriptor; `MinSounds` keeps applying to runtime categories only.
+"Interior Rain" category; its WTHRs list that descriptor as a precipitation
+sound in 13 weathers. Thunder and the outdoor rain descriptors stay on VSfW's
+categories via the patch. One descriptor was below `MinSounds` (3), so no
+slider. Fix (1.0.3): unlisted mod categories need only one descriptor;
+`MinSounds` keeps applying to runtime categories only.
+
+Correction after in-game listening (same day): `Cathedral_Rain_Interior_LP`
+is NOT the main rain. Its conditions are `IsInInterior == 1` plus location
+type keywords (house / inn / store / dwelling / player house, Dragonsreach,
+Temple of Kynareth) and exclusions (Markarth, parts of Solitude, the College,
+...); the outdoor rain descriptors (`Cathedral_Rain_Heavy_LP`, `_Medium...`)
+carry `IsInInterior == 0`. In the lab instance the interior loop was not
+audible anywhere (Sleeping Giant Inn, Dragonsreach), so the 1.0.3 slider is
+correct but drives a sound that did not play there. VSfW's Rain / Thunder
+sliders DID control Cathedral's outdoor rain and thunder with the Unofficial
+Update loaded, so phbd01's "VSfW doesn't work with the Unofficial Update"
+was not reproduced; likely a missing / disabled / overridden VSfW Cathedral
+patch on their side (asked for their load order). 1.0.3 stays in the repo but
+is not released separately.
