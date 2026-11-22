@@ -1,6 +1,7 @@
 # Quick Audio Sliders
 
-**Version 1.0.3**
+**Version 1.0.3** (repo only, not released separately; the latest Nexus
+download is 1.0.2)
 
 SKSE plugin for Skyrim SE/AE: an in-game volume panel rendered through
 [SKSE Menu Framework](https://www.nexusmods.com/skyrimspecialedition/mods/120352).

@@ -537,8 +537,11 @@ checked in the original ESP), so alone it shows on the Volume page. VSfW's
 Cathedral patch overrides those three with the flag removed (0x1 / 0x0 / 0x0)
 and moves the sounds into its own categories. Likely case in that log (not
 verified, CWUU not inspected): the VSfW Cathedral patch hides the categories
-while the Unofficial Update, loading later, routes sounds back into them. A
-category that is hidden but still used had no slider anywhere:
+while the Unofficial Update, loading later, routes sounds back into them.
+(Not confirmed as the cause of the report: see the 2026-11-02 correction
+below. The Unofficial Update re-routes a single interior descriptor, and
+VSfW's sliders did control the outdoor rain and thunder.) A category that is
+hidden but still used had no slider anywhere:
 `PlanModCategories` skips sounds on mod-defined categories ("314 on mod-owned
 categories" in that log) assuming the mod provides the slider.
 
@@ -566,15 +569,20 @@ slider. Fix (1.0.3): unlisted mod categories need only one descriptor;
 `MinSounds` keeps applying to runtime categories only.
 
 Correction after in-game listening (same day): `Cathedral_Rain_Interior_LP`
-is NOT the main rain. Its conditions are `IsInInterior == 1` plus location
+is NOT the main rain. The 1.0.3 commit (5bbe0eb), the first version of the
+entry above and the code comment on `AddUnlistedModCategories` assumed it
+was, because 13 weathers list it as a precipitation sound. Its conditions are `IsInInterior == 1` plus location
 type keywords (house / inn / store / dwelling / player house, Dragonsreach,
 Temple of Kynareth) and exclusions (Markarth, parts of Solitude, the College,
-...); the outdoor rain descriptors (`Cathedral_Rain_Heavy_LP`, `_Medium...`)
+...); the outdoor rain loops (`Cathedral_Rain_Heavy_LP` and its Medium
+counterpart; the other editor IDs and the FormIDs were not written down)
 carry `IsInInterior == 0`. In the lab instance the interior loop was not
 audible anywhere (Sleeping Giant Inn, Dragonsreach), so the 1.0.3 slider is
 correct but drives a sound that did not play there. VSfW's Rain / Thunder
 sliders DID control Cathedral's outdoor rain and thunder with the Unofficial
-Update loaded, so phbd01's "VSfW doesn't work with the Unofficial Update"
-was not reproduced; likely a missing / disabled / overridden VSfW Cathedral
-patch on their side (asked for their load order). 1.0.3 stays in the repo but
-is not released separately.
+Update loaded, so phbd01's report (paraphrased, as recorded above: weather
+sounds not adjustable with the Unofficial Update, and no extra weather sliders
+on 1.0.2) was not reproduced; likely a missing / disabled / overridden VSfW
+Cathedral patch on their side (asked for their load order). 1.0.3 stays in
+the repo but is not released separately; the README says so next to the
+version number.

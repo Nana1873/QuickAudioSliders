@@ -1242,9 +1242,10 @@ namespace
     // descriptor is re-pointed. Needed: at least one descriptor on the
     // category itself, not engine-managed, plugin not excluded. MinSounds
     // does not apply: it keeps runtime categories from splitting off stray
-    // sounds, but a category the mod made on purpose can carry a single,
-    // important one (Cathedral Weathers Unofficial Update plays its main rain
-    // through the one descriptor left on the hidden "Interior Rain").
+    // sounds, but a category the mod made on purpose can carry a single
+    // descriptor (Cathedral Weathers Unofficial Update leaves exactly one,
+    // an interior-only, conditioned rain loop, on the hidden "Interior
+    // Rain"; it is not the main rain, see docs/design-notes.md).
     void AddUnlistedModCategories(RE::TESDataHandler* a_dataHandler)
     {
         std::unordered_map<RE::BGSSoundCategory*, std::size_t> descriptorCounts;
