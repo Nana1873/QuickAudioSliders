@@ -239,6 +239,22 @@ Beim nächsten Menü-Ereignis im Spiel:
 [info] Persisted [Volumes] Skyrim.esm|071E64 = 0.6600 (ok)
 ```
 
+### Nachtrag: Seite „Now Playing"
+
+Nach diesem Bericht dazugekommen und **nicht Teil der Tabelle oben**. Bisher
+nur ein Kurztest auf 1.6.1170 (nur Vanilla-Plugins, erzwungenes Gewitter):
+
+```
+[info] Registered SKSE Menu Framework section 'Quick Audio Sliders' (framework v3.8), pages: Volume, Extra Sliders, Now Playing
+[info] Now Playing: 3297 sound descriptor(s) indexed; BGSStandardSoundDef::DoResolve hooked (keeps the last 64 distinct sounds for 120 s)
+```
+
+Die Seite zeigte danach zehn Zeilen mit Zähler, Plugin, Regler („Effekte",
+einmal „Thunder (weather)") und Alter; kein Absturz. Namen erschienen als
+`Skyrim.esm|<FormID>`, weil die Testinstanz keine Editor-IDs wiederherstellt.
+Nicht gelaufen: 1.7.104, eine große Load Order, `Enabled=0`, längeres Spielen
+mit dem Hook, und ob die gelisteten Sounds die sind, die man hört.
+
 ## 3. Nur nach Gehör prüfbar und noch offen
 
 - Ob das Umhängen der Vanilla-Wettersounds von Ambience/Effekte auf die neuen

@@ -38,6 +38,16 @@ namespace QAS::Translation
         std::string footer = "Changes apply immediately and are saved.";
         std::string waiting = "Waiting for game data to load...";
         std::string noCategories = "No sound categories with a menu slider found in this load order.";
+        // Page "Now Playing"
+        std::string nowPlayingHint = "Sounds the game requested in the last two minutes, newest first, and the slider that controls each.";
+        std::string nowPlayingEmpty = "No sound was requested in the last two minutes.";
+        std::string nowPlayingLimits = "Voice lines and music started by file name are not listed.";
+        std::string colSound = "Sound";
+        std::string colMod = "Mod";
+        std::string colSlider = "Slider";
+        std::string colAge = "Ago";
+        std::string noSlider = "none (global only)";
+        std::string extraPageTag = "Extra Sliders";
     };
 
     void           LoadStrings();

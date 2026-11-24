@@ -637,6 +637,13 @@ namespace
             "Weather=1"sv },
     };
 
+    constexpr IniTemplateKey kNowPlayingKeys[] = {
+        { "Enabled"sv,
+            "; Enabled: 1 = show the page and keep a short list of the requested sounds\n"
+            "; (default), 0 = no page and no hook. Takes effect on the next game start.\n"
+            "Enabled=1"sv },
+    };
+
     constexpr IniTemplateSection kIniTemplate[] = {
         { std::string_view{ QAS::Ini::kModCategoriesSection },
             "[ModCategories]\n"
@@ -647,6 +654,12 @@ namespace
             "; skipped. Sound categories a mod defines but hides from the menu (or a\n"
             "; patch hides) still get an Extra slider when sounds use them."sv,
             kModCategoriesKeys, std::size(kModCategoriesKeys) },
+        { "NowPlaying"sv,
+            "[NowPlaying]\n"
+            "; Page \"Now Playing\": lists the sounds the game requested in the last two\n"
+            "; minutes and the slider that controls each. Sounds started by file name\n"
+            "; (voice lines, most music) are not listed."sv,
+            kNowPlayingKeys, std::size(kNowPlayingKeys) },
         { "Labels"sv,
             "[Labels]\n"
             "; Optional display-name overrides for sliders, shown verbatim.\n"
@@ -2095,6 +2108,21 @@ namespace QAS::Audio
     float GetGlobal()
     {
         return g_global.load();
+    }
+
+    bool SliderFor(const RE::BGSSoundCategory* a_category, std::string& a_label, bool& a_extraPage)
+    {
+        // Bounded walk: a malformed plugin could make the parents a cycle.
+        for (int depth = 0; a_category && depth < 16; ++depth, a_category = a_category->parentCategory) {
+            for (const auto& entry : g_entries) {
+                if (entry->category == a_category) {
+                    a_label = entry->label;
+                    a_extraPage = entry->synthetic;
+                    return true;
+                }
+            }
+        }
+        return false;
     }
 
     std::size_t RootCount()

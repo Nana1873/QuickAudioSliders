@@ -1,5 +1,6 @@
 #include "AudioSliders.h"
 #include "MenuIntegration.h"
+#include "NowPlaying.h"
 #include "Translation.h"
 
 #include <spdlog/sinks/basic_file_sink.h>
@@ -42,6 +43,9 @@ namespace
             QAS::Translation::Import("QuickAudioSliders");
             QAS::Translation::LoadStrings();
             QAS::Audio::Initialize();
+            if (QAS::NowPlaying::Enabled()) {
+                QAS::NowPlaying::Install();
+            }
             break;
         default:
             break;

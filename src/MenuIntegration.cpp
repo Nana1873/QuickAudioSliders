@@ -1,6 +1,7 @@
 #include "MenuIntegration.h"
 
 #include "AudioSliders.h"
+#include "NowPlaying.h"
 #include "PluginIni.h"
 #include "SKSEMenuFramework.h"
 #include "Translation.h"
@@ -162,6 +163,56 @@ namespace
         ImGuiMCP::TextDisabled("%s", strings.footer.c_str());
     }
 
+    // Page "Now Playing": what the game asked to play in the last minute and
+    // which slider controls it (see NowPlaying.h).
+    void __stdcall RenderNowPlaying()
+    {
+        const auto& strings = QAS::Translation::S();
+        if (!BeginPage()) {
+            return;
+        }
+        // The hint and long names wrap instead of running out of the panel.
+        ImGuiMCP::PushTextWrapPos(0.0F);
+        ImGuiMCP::TextDisabled("%s", strings.nowPlayingHint.c_str());
+        ImGuiMCP::PopTextWrapPos();
+        ImGuiMCP::Spacing();
+        const auto rows = QAS::NowPlaying::Snapshot();
+        if (rows.empty()) {
+            ImGuiMCP::TextDisabled("%s", strings.nowPlayingEmpty.c_str());
+        } else if (ImGuiMCP::BeginTable("##nowplaying", 4,
+                       ImGuiMCP::ImGuiTableFlags_SizingStretchProp | ImGuiMCP::ImGuiTableFlags_RowBg)) {
+            ImGuiMCP::TableSetupColumn(strings.colSound.c_str(), ImGuiMCP::ImGuiTableColumnFlags_WidthStretch, 4.0F);
+            ImGuiMCP::TableSetupColumn(strings.colMod.c_str(), ImGuiMCP::ImGuiTableColumnFlags_WidthStretch, 3.0F);
+            ImGuiMCP::TableSetupColumn(strings.colSlider.c_str(), ImGuiMCP::ImGuiTableColumnFlags_WidthStretch, 3.0F);
+            ImGuiMCP::TableSetupColumn(strings.colAge.c_str(), ImGuiMCP::ImGuiTableColumnFlags_WidthStretch, 1.0F);
+            ImGuiMCP::TableHeadersRow();
+            for (const auto& row : rows) {
+                ImGuiMCP::TableNextRow();
+                ImGuiMCP::TableNextColumn();
+                if (row.count > 1) {
+                    ImGuiMCP::TextWrapped("%s (x%u)", row.sound.c_str(), row.count);
+                } else {
+                    ImGuiMCP::TextWrapped("%s", row.sound.c_str());
+                }
+                ImGuiMCP::TableNextColumn();
+                ImGuiMCP::TextWrapped("%s", row.plugin.c_str());
+                ImGuiMCP::TableNextColumn();
+                if (row.slider.empty()) {
+                    ImGuiMCP::TextDisabled("%s", strings.noSlider.c_str());
+                } else if (row.extraPage) {
+                    ImGuiMCP::TextWrapped("%s (%s)", row.slider.c_str(), strings.extraPageTag.c_str());
+                } else {
+                    ImGuiMCP::TextWrapped("%s", row.slider.c_str());
+                }
+                ImGuiMCP::TableNextColumn();
+                ImGuiMCP::TextUnformatted(std::format("{:.0f} s", row.secondsAgo).c_str());
+            }
+            ImGuiMCP::EndTable();
+        }
+        ImGuiMCP::Spacing();
+        ImGuiMCP::TextDisabled("%s", strings.nowPlayingLimits.c_str());
+    }
+
     // [ModCategories] Enabled (default 1), read directly at kPostLoad (before
     // AudioSliders resolves its paths) so the "Mods" page is registered only
     // when the feature is on.
@@ -195,7 +246,11 @@ namespace QAS::MenuIntegration
         if (extraPage) {
             SKSEMenuFramework::AddSectionItem("Extra Sliders", RenderMods);
         }
-        logs::info("Registered SKSE Menu Framework section '{}' (framework v{}), pages: Volume{}", kSectionName,
-            version, extraPage ? ", Extra Sliders" : "");
+        const bool nowPlayingPage = QAS::NowPlaying::Enabled();
+        if (nowPlayingPage) {
+            SKSEMenuFramework::AddSectionItem("Now Playing", RenderNowPlaying);
+        }
+        logs::info("Registered SKSE Menu Framework section '{}' (framework v{}), pages: Volume{}{}", kSectionName,
+            version, extraPage ? ", Extra Sliders" : "", nowPlayingPage ? ", Now Playing" : "");
     }
 }

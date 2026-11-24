@@ -102,4 +102,9 @@ namespace QAS::Audio
     void                      SetGlobal(float a_multiplier);
     void                      PersistGlobal();
     [[nodiscard]] bool        GlobalDirty();  // SetGlobal() without a PersistGlobal() yet
+
+    // The slider that controls a sound on a_category: the first slider up
+    // the parent chain. False when no slider is on the chain (the global
+    // slider still scales it through its root).
+    bool SliderFor(const RE::BGSSoundCategory* a_category, std::string& a_label, bool& a_extraPage);
 }

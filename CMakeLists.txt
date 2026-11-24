@@ -16,6 +16,7 @@ add_commonlibsse_plugin(${PROJECT_NAME}
         src/main.cpp
         src/AudioSliders.cpp
         src/MenuIntegration.cpp
+        src/NowPlaying.cpp
         src/Translation.cpp
 )
 

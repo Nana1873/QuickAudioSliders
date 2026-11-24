@@ -740,6 +740,32 @@ no direct caller). A view would have to read `stateMap` under the read lock
 (no category in `BSSoundInfo` as far as the headers show) or hook the audio
 thread.
 
+### Built as "recently requested sounds" (2026-11-24)
+
+Page "Now Playing" (`src/NowPlaying.cpp`, `[NowPlaying] Enabled=1`). Instead
+of the audio manager's maps it hooks the descriptor: `BSAudioManager::
+GetSoundHandle` @ 140cb11a0 calls `descriptor->DoResolve(resolution)` before
+it creates the sound and posts `LoadForPlayback`, so a vtable hook on
+`BGSStandardSoundDef::DoResolve` (index 1, @ 140325cd0) sees every sound that
+is started through a descriptor, on the thread that asks for it. The hook
+calls the original and, on success, notes the descriptor under a mutex (at
+most 64 distinct descriptors, dropped two minutes after their last request).
+The page resolves name and plugin from an index built at `kDataLoaded` and
+finds the slider by walking the category's parents (`Audio::SliderFor`).
+
+- It records all the time, not only while the page is open: SKSE Menu
+  Framework freezes the game while its window is shown, and the sound one
+  asks about was heard before.
+- Not listed: sounds started by file (`GetSoundHandleByFile`, voice lines,
+  most music). Listed although possibly never audible: a handle that is
+  created and not played, and anything else that calls `DoResolve` (precache
+  was not checked).
+- Names are editor IDs only with an editor-ID restoring plugin; otherwise
+  `<plugin>|<local FormID>`.
+- First hook into game code in this plugin. Smoke-tested on 1.6.1170 only
+  (forced thunderstorm, list filled, slider column showed "Effekte" and
+  "Thunder (weather)", no crash). Not run on 1.7.104, not measured for cost.
+
 ## After the lab report (2026-11-24, `docs/test-report-1.1.0.md`)
 
 Changed in reaction to the report, again without a build (written in the
@@ -769,4 +795,3 @@ Left as is, known from the report:
   template wants to add a key).
 - Not run at all: a real slider in Settings > Audio, SkyParkour, a real
   long-used 1.0.2 INI, and everything that needs ears.
-
