@@ -630,6 +630,11 @@ namespace
             "; Exclude: comma-separated, case-insensitive plugin-name substrings that\n"
             "; never get a runtime category. Example: Exclude=EVE,Taberu\n"
             "Exclude="sv },
+        { "Weather"sv,
+            "; Weather: 1 = automatic Rain / Snow / Thunder / Wind sliders for the\n"
+            "; weather sounds that no mod slider covers, i.e. those still running through\n"
+            "; Vanilla categories such as Ambience (default), 0 = off.\n"
+            "Weather=1"sv },
     };
 
     constexpr IniTemplateSection kIniTemplate[] = {
@@ -1086,6 +1091,10 @@ namespace
         RE::BGSSoundCategory*                   parent{ nullptr };
         std::vector<RE::BGSSoundDescriptor*>    descriptors;
         RE::BGSSoundCategory*                   created{ nullptr };
+        // Weather plans (PlanWeatherCategories) fix both; empty = derived
+        // from the mod name and the parent.
+        std::string                             label;
+        std::string                             persistKey;
     };
     std::vector<ModCategoryPlan> g_modPlans;
 
@@ -1404,6 +1413,158 @@ namespace
     // and the matching slider entries. Descriptors are re-pointed later, one
     // frame after kDataLoaded (see Initialize), so other plugins' kDataLoaded
     // work has finished.
+    constexpr auto kWeatherOwner = "Weather"sv;  // pseudo plugin name: group heading of the weather sliders
+
+    // Automatic weather sliders. Every WTHR lists its sounds with a type
+    // (precipitation / wind / thunder). A listed sound that still hangs on a
+    // Vanilla-defined category (Ambience, ...) has no slider of its own: it
+    // gets a runtime category per type under that parent, exactly like the
+    // per-mod categories. A sound a mod already put on its own category
+    // (NAT, True Storms, Volume Sliders for Weather and its patches) is left
+    // alone, so no load-order rules are needed; when such a mod slider exists
+    // for a type, ours is labelled "... other" to tell the two apart.
+    // Precipitation is Rain or Snow by the flags of the weathers using it.
+    // Not found this way: the Vanilla interior rain loop, which no record
+    // references (the engine plays it).
+    void PlanWeatherCategories(RE::TESDataHandler* a_dataHandler)
+    {
+        enum Kind : std::size_t { kRain, kSnow, kThunder, kWind, kKinds };
+        static constexpr std::array<std::string_view, kKinds> kNames{ "Rain"sv, "Snow"sv, "Thunder"sv, "Wind"sv };
+
+        struct Usage
+        {
+            RE::BGSSoundDescriptorForm*    form{ nullptr };
+            std::array<std::size_t, kKinds> votes{};
+        };
+        std::unordered_map<RE::BGSSoundDescriptor*, Usage> usages;
+        std::size_t                                         weathers = 0;
+        for (auto* weather : a_dataHandler->GetFormArray<RE::TESWeather>()) {
+            if (!weather) {
+                continue;
+            }
+            ++weathers;
+            const bool snowy = weather->data.flags.any(RE::TESWeather::WeatherDataFlag::kSnow) &&
+                               !weather->data.flags.any(RE::TESWeather::WeatherDataFlag::kRainy);
+            for (auto* sound : weather->sounds) {
+                if (!sound) {
+                    continue;
+                }
+                Kind kind = kKinds;
+                switch (sound->type.get()) {
+                case RE::TESWeather::SoundType::kPrecip:
+                    kind = snowy ? kSnow : kRain;
+                    break;
+                case RE::TESWeather::SoundType::kThunder:
+                    kind = kThunder;
+                    break;
+                case RE::TESWeather::SoundType::kWind:
+                    kind = kWind;
+                    break;
+                default:
+                    break;  // "Default" entries are general ambience, not weather noise
+                }
+                if (kind == kKinds) {
+                    continue;
+                }
+                // The entry names a sound descriptor, or a SOUN wrapping one.
+                auto* form = RE::TESForm::LookupByID(sound->soundFormID);
+                auto* descriptorForm = form ? form->As<RE::BGSSoundDescriptorForm>() : nullptr;
+                if (!descriptorForm && form) {
+                    if (const auto* soun = form->As<RE::TESSound>()) {
+                        descriptorForm = soun->descriptor;
+                    }
+                }
+                if (!descriptorForm || !descriptorForm->soundDescriptor) {
+                    continue;
+                }
+                auto& usage = usages[descriptorForm->soundDescriptor];
+                usage.form = descriptorForm;
+                ++usage.votes[kind];
+            }
+        }
+
+        const auto srdConfigs = LoadSrdCategoryConfigs();
+        const auto excludes = ReadExcludeList();
+        std::array<bool, kKinds> coveredByMod{};
+        std::size_t              onModCategory = 0, engineManaged = 0, skipped = 0, moved = 0;
+        std::vector<ModCategoryPlan>                 plans;
+        std::vector<Kind>                            planKinds;
+        std::vector<const RE::BGSSoundDescriptor*>   claimed;
+        for (auto& [descriptor, usage] : usages) {
+            const auto kind = static_cast<Kind>(
+                std::distance(usage.votes.begin(), std::max_element(usage.votes.begin(), usage.votes.end())));
+            auto* category = descriptor->category;
+            if (!category) {
+                ++skipped;
+                continue;
+            }
+            const auto* categoryFiles = category->sourceFiles.array;
+            const auto* categoryDefiner = (categoryFiles && !categoryFiles->empty()) ? categoryFiles->front() : nullptr;
+            if (!categoryDefiner || !IsVanillaFile(categoryDefiner->GetFilename())) {
+                coveredByMod[kind] = true;  // a mod routes this sound through its own category
+                ++onModCategory;
+                continue;
+            }
+            if (IsEngineManagedVanillaCategory(*category)) {
+                ++engineManaged;
+                continue;
+            }
+            const auto* sourceFiles = usage.form->sourceFiles.array;
+            const auto* source = (sourceFiles && !sourceFiles->empty()) ? sourceFiles->front() : nullptr;
+            const std::string pluginFile{ source ? source->GetFilename() : std::string_view{} };
+            if (IsExcluded(excludes, pluginFile) ||
+                SrdAssignsCategory(srdConfigs, pluginFile, usage.form->GetLocalFormID())) {
+                ++skipped;
+                continue;
+            }
+            std::size_t planIndex = 0;
+            for (; planIndex < plans.size(); ++planIndex) {
+                if (planKinds[planIndex] == kind && plans[planIndex].parent == category) {
+                    break;
+                }
+            }
+            if (planIndex == plans.size()) {
+                ModCategoryPlan plan;
+                plan.pluginFile = std::string(kWeatherOwner);
+                plan.parent = category;
+                // GetLocalFormID: the parent is Vanilla-defined, so the key
+                // does not depend on the load order.
+                plan.persistKey = std::format("weather:{}|{:08X}", kNames[kind], category->GetLocalFormID());
+                plans.push_back(std::move(plan));
+                planKinds.push_back(kind);
+            }
+            plans[planIndex].descriptors.push_back(descriptor);
+            claimed.push_back(descriptor);
+            ++moved;
+        }
+
+        // A weather sound of a mod without own slider was planned into that
+        // mod's "<Mod> (Ambience)" category: the weather slider takes it.
+        for (auto& plan : g_modPlans) {
+            std::erase_if(plan.descriptors, [&](const RE::BGSSoundDescriptor* a_descriptor) {
+                return std::find(claimed.begin(), claimed.end(), a_descriptor) != claimed.end();
+            });
+        }
+        std::erase_if(g_modPlans, [](const ModCategoryPlan& a_plan) { return a_plan.descriptors.empty(); });
+
+        for (std::size_t index = 0; index < plans.size(); ++index) {
+            const auto kind = planKinds[index];
+            const auto sameKind = static_cast<std::size_t>(std::count(planKinds.begin(), planKinds.end(), kind));
+            std::string detail = coveredByMod[kind] ? "weather, other" : "weather";
+            if (sameKind > 1) {
+                if (const auto parentLabel = ParentLabel(*plans[index].parent); !parentLabel.empty()) {
+                    detail += ", " + parentLabel;
+                }
+            }
+            plans[index].label = std::format("{} ({})", kNames[kind], detail);
+            g_modPlans.push_back(std::move(plans[index]));
+        }
+        logs::info("Weather sounds: {} descriptor(s) listed by {} weather(s) as precipitation / thunder / wind: "
+                   "{} on a mod's own category, {} engine-managed, {} excluded or without category, "
+                   "{} get {} weather slider(s)",
+            usages.size(), weathers, onModCategory, engineManaged, skipped, moved, plans.size());
+    }
+
     void CreateModCategories()
     {
         auto* factory = RE::IFormFactory::GetConcreteFormFactoryByType<RE::BGSSoundCategory>();
@@ -1424,7 +1585,9 @@ namespace
             }
             const auto parentLabel = ParentLabel(*plan.parent);
             auto       label = ShortModName(plan.pluginFile);
-            if (sameMod > 1 && !parentLabel.empty()) {
+            if (!plan.label.empty()) {
+                label = plan.label;
+            } else if (sameMod > 1 && !parentLabel.empty()) {
                 label = std::format("{} ({})", label, parentLabel);
             }
 
@@ -1451,7 +1614,9 @@ namespace
             entry->ownerFileName = plan.pluginFile;
             // GetLocalFormID, not a mask: an ESL-defined parent's FE-prefixed
             // slot is load-order-dependent and must stay out of the key.
-            entry->persistKey = std::format("mod:{}|{:08X}", plan.pluginFile, plan.parent->GetLocalFormID());
+            entry->persistKey = !plan.persistKey.empty() ?
+                                    plan.persistKey :
+                                    std::format("mod:{}|{:08X}", plan.pluginFile, plan.parent->GetLocalFormID());
             logs::info("Mod category '{}' {:08X} for {} descriptor(s) of '{}' (parent {:08X} '{}', key '{}')", label,
                 entry->formID, plan.descriptors.size(), plan.pluginFile, plan.parent->GetFormID(), parentLabel,
                 entry->persistKey);
@@ -1662,7 +1827,9 @@ namespace QAS::Audio
         const bool modCategoriesEnabled = ReadIniInt(kModCategoriesSection, QAS::Ini::kModCategoriesEnabledKey,
                                               QAS::Ini::kModCategoriesEnabledDefault ? 1 : 0) != 0;
         const int  modCategoriesMinSounds = ReadIniInt(kModCategoriesSection, "MinSounds", 3);
-        logs::info("[ModCategories] Enabled={} MinSounds={}", modCategoriesEnabled ? 1 : 0, modCategoriesMinSounds);
+        const bool weatherCategoriesEnabled = ReadIniInt(kModCategoriesSection, "Weather", 1) != 0;
+        logs::info("[ModCategories] Enabled={} MinSounds={} Weather={}", modCategoriesEnabled ? 1 : 0,
+            modCategoriesMinSounds, weatherCategoriesEnabled ? 1 : 0);
 
         auto* dataHandler = RE::TESDataHandler::GetSingleton();
         if (!dataHandler) {
@@ -1708,6 +1875,9 @@ namespace QAS::Audio
         if (modCategoriesEnabled) {
             AddUnlistedModCategories(dataHandler);
             PlanModCategories(dataHandler, modCategoriesMinSounds);
+            if (weatherCategoriesEnabled) {
+                PlanWeatherCategories(dataHandler);
+            }
             CreateModCategories();
         }
 

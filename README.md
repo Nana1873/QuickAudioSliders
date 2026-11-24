@@ -34,6 +34,12 @@ their sounds through vanilla categories and have no slider of their own
   (`fVal<n>` / `uID<n>`) are still written there as well, so the Vanilla menu
   shows the same values.
 - The log of the previous session is kept as `QuickAudioSliders.prev.log`.
+- Automatic weather sliders ("Rain (weather)", "Snow", "Thunder", "Wind" on the
+  Extra Sliders page) for the weather sounds no mod slider covers: sounds the
+  weather records list as precipitation / thunder / wind that still run through
+  a Vanilla category. Sounds a weather mod or Volume Sliders for Weather
+  already routes through its own category are left alone. Off with
+  `[ModCategories] Weather=0`.
 - Labels come from the game's own Scaleform translation table, so `$Effects`
   shows as "Effects" / "Effekte" in the player's language.
 

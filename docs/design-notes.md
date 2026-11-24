@@ -658,3 +658,56 @@ in the Vanilla menu since; change in the Vanilla menu then restart; with and
 without Engine Fixes (stale `EngineFixes_SNCT.ini`); plugin INI read-only;
 global multiplier with a root menu category (SkyParkour, Word Walls); Vanilla
 master at 50% across a restart; Reset All.
+
+## Automatic weather sliders, second attempt (1.1.0, 2026-11-24)
+
+Requested again after the VSfW / Cathedral / Reverb reports ("can't this be
+dynamic instead of patched per mod"). The first prototype (2026-11-01) was
+dropped because every load order needed another rule. This one has a single
+rule and never touches a sound a mod already owns. Like the store rework it
+was NOT built or run when written.
+
+`PlanWeatherCategories` (after `PlanModCategories`, `[ModCategories]
+Weather=1`): collect every WTHR sound entry of type Precip / Thunder / Wind
+(SNDR, or SOUN -> SNDR); precipitation counts as Snow when the weather has the
+Snow flag and not the Rainy flag, the type with the most votes wins per
+descriptor. Then per descriptor:
+
+- category defined by a non-Vanilla plugin -> left alone, and the type is
+  marked "covered by a mod" (NAT, True Storms, VSfW and its patches);
+- engine-managed Vanilla category, `Exclude`d plugin, SRD-assigned -> left
+  alone;
+- otherwise (still on Ambience etc., Vanilla descriptors included) -> runtime
+  category per (type, parent), re-pointed like the per-mod categories. Label
+  "Rain (weather)", or "Rain (weather, other)" when a mod slider covers the
+  same type, plus the parent name when one type has several parents. Key
+  `weather:<Type>|<parent local FormID>`. Pseudo owner "Weather" gives the
+  group heading. A descriptor already planned into a "<Mod> (Ambience)"
+  category moves to the weather plan.
+
+Type "Default" entries are skipped (general ambience). Not found this way:
+`AMBWeatherRainInteriorLPSD` (no record references it) and any sound a mod
+plays by script. To check in the lab: Vanilla weathers only; NAT; True
+Storms; VSfW with and without patch; Cathedral + Unofficial Update; that
+re-pointing Vanilla descriptors off Ambience has no side effect (ducking,
+interior muffling).
+
+## "Now playing" view: what CommonLib shows (not implemented)
+
+Idea: a page listing the sounds playing right now with the slider that
+controls each, so "slider has no effect" reports answer themselves. From the
+CommonLibSSE-NG headers (commit 12d61f3):
+
+- `BSAudioManager::activeSounds` is a `BSTHashMap<uint32, BSGameSound*>`.
+- `BSGameSound` has `IsPlaying()`, `volume`, `resourceID` (file hash, no
+  name) and `QCategory()` -> `BSISoundCategory*`; `BGSSoundCategory` derives
+  from it, so the controlling slider is the first entry up the parent chain.
+- No back pointer to the descriptor form, so a row could show category, file
+  hash and volume, not an editor ID.
+
+Open and the reason it is not built: nothing in the headers says which thread
+owns `activeSounds` or which lock guards it (`ownerThread` / `ownerThreadID`
+suggest the audio thread). Iterating it from the render or game thread
+without that lock can crash. Needs Ghidra on 1.6.1170: find who inserts into
+/ erases from the map at +0x28 and under which lock, then decide.
+
