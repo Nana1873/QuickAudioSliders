@@ -12,8 +12,7 @@ their sounds through vanilla categories and have no slider of their own
 (runtime-only categories, save-neutral); page **"Now Playing"** lists the
 sounds the game requested in the last two minutes with the slider that
 controls each (off with `[NowPlaying] Enabled=0`; voice lines and music
-started by file name are not listed, and names need an editor-ID restoring
-plugin). No more Escape → Settings → Audio.
+started by file name are not listed). No more Escape → Settings → Audio.
 
 - Changes apply live through `BSISoundCategory::SetCategoryVolume` plus the
   engine's VolumeChanged broadcast, the same path the Vanilla slider uses;

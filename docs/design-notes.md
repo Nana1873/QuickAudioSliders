@@ -760,18 +760,23 @@ finds the slider by walking the category's parents (`Audio::SliderFor`).
   most music). Listed although possibly never audible: a handle that is
   created and not played, and anything else that calls `DoResolve` (precache
   was not checked).
-- Names are editor IDs only with an editor-ID restoring plugin; otherwise
-  `<plugin>|<local FormID>`.
+- Names are the editor IDs noted at load time (see below); a descriptor
+  without one shows as `<plugin>|<local FormID>`.
 - First hook into game code in this plugin. Run on 1.6.1170 and on 1.7.104
   in a large load order (2026-11-24): the list fills, the slider column
   shows "Effekte", "Fußstapfen", "Thunder (weather)", no crash in 25 game
   starts with the hook installed; `Enabled=0` registers no page and no hook.
   Not measured for cost.
-- Open: no sound names in practice. `GetFormEditorID()` returned nothing for
-  sound descriptors on 1.7.104 even with Native EditorID Fix installed, so
-  every row reads `<plugin>|<FormID>`. `BGSSoundDescriptorForm` has its own
-  `SetFormEditorID` (@ 140324160 on 1.6.1170); where it keeps the ID was not
-  looked up.
+- Sound names: `GetFormEditorID()` returned nothing for sound descriptors,
+  on 1.7.104 even with Native EditorID Fix installed. Ghidra (1.6.1170):
+  `BGSSoundDescriptorForm::SetFormEditorID` @ 140324160 only files a hash of
+  the name in a map (@ 142010880) for `GetSoundHandleByName`; the string is
+  not kept. So the plugin hooks that function through the vtable (index
+  0x33) at plugin load and notes the names while the records load, then
+  copies them into the index at `kDataLoaded`. Result: 3297 of 3297
+  descriptors named on 1.6.1170, 3338 of 3338 on 1.7.104; the page shows
+  `AMBrWindForestPineGustB01`, `NPCDogBarkDistantSD`, `FSTPlayerDirtJumpDownSD`.
+  A plugin that hooks the same vtable slot is chained, not replaced.
 
 ## After the lab report (2026-11-24, `docs/test-report-1.1.0.md`)
 

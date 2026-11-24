@@ -75,6 +75,29 @@ namespace
 
         static inline REL::Relocation<decltype(thunk)> func;
     };
+
+    // The engine does not keep the editor ID of a sound descriptor: its
+    // SetFormEditorID (1.6.1170: 140324160) only files a hash of the name for
+    // GetSoundHandleByName. So the names are noted here while the records
+    // load, until Install() has copied them into the index. An ID changed in
+    // a running game is not followed.
+    std::mutex                                                         g_namesMutex;
+    std::unordered_map<const RE::BGSSoundDescriptorForm*, std::string> g_names;
+    std::atomic<bool>                                                  g_namesOpen{ true };
+
+    struct SetEditorIDHook
+    {
+        static bool thunk(RE::BGSSoundDescriptorForm* a_this, const char* a_editorID)
+        {
+            if (a_editorID && *a_editorID && g_namesOpen.load(std::memory_order_relaxed)) {
+                const std::lock_guard lock(g_namesMutex);
+                g_names.insert_or_assign(a_this, a_editorID);
+            }
+            return func(a_this, a_editorID);
+        }
+
+        static inline REL::Relocation<decltype(thunk)> func;
+    };
 }
 
 namespace QAS::NowPlaying
@@ -89,6 +112,13 @@ namespace QAS::NowPlaying
         return GetPrivateProfileIntA("NowPlaying", "Enabled", 1, path.string().c_str()) != 0;
     }
 
+    void InstallNameCapture()
+    {
+        REL::Relocation<std::uintptr_t> vtable{ RE::VTABLE_BGSSoundDescriptorForm[0] };
+        SetEditorIDHook::func = vtable.write_vfunc(0x33, SetEditorIDHook::thunk);
+        logs::info("Now Playing: noting the editor IDs of sound descriptors while the game data loads");
+    }
+
     void Install()
     {
         auto* dataHandler = RE::TESDataHandler::GetSingleton();
@@ -96,7 +126,10 @@ namespace QAS::NowPlaying
             logs::warn("Now Playing: TESDataHandler unavailable; page stays empty");
             return;
         }
+        g_namesOpen.store(false);
+        const std::lock_guard namesLock(g_namesMutex);
         g_index.clear();
+        std::size_t named = 0;
         for (auto* form : dataHandler->GetFormArray<RE::BGSSoundDescriptorForm>()) {
             if (!form || !form->soundDescriptor) {
                 continue;
@@ -104,13 +137,22 @@ namespace QAS::NowPlaying
             Info        info;
             const auto* file = form->GetFile(0);
             info.plugin = file ? std::string(file->GetFilename()) : std::string();
-            // Editor IDs of sound descriptors are only kept with an editor-ID
-            // restoring plugin (po3 Tweaks, Native EditorID Fix).
+            // The name noted while loading, else what an editor-ID restoring
+            // plugin may answer, else plugin and FormID.
             const char* editorID = form->GetFormEditorID();
-            info.name = editorID && *editorID ? std::string(editorID) :
-                                                std::format("{}|{:06X}", info.plugin, form->GetLocalFormID());
+            if (const auto it = g_names.find(form); it != g_names.end()) {
+                info.name = it->second;
+                ++named;
+            } else if (editorID && *editorID) {
+                info.name = editorID;
+                ++named;
+            } else {
+                info.name = std::format("{}|{:06X}", info.plugin, form->GetLocalFormID());
+            }
             g_index.emplace(form->soundDescriptor, std::move(info));
         }
+        g_names.clear();  // copied into the index
+        logs::info("Now Playing: {} of {} sound descriptor(s) have a name", named, g_index.size());
 
         REL::Relocation<std::uintptr_t> vtable{ RE::VTABLE_BGSStandardSoundDef[0] };
         DoResolveHook::func = vtable.write_vfunc(1, DoResolveHook::thunk);

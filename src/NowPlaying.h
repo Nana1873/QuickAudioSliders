@@ -9,6 +9,11 @@ namespace QAS::NowPlaying
     // the file, so it also works at kPostLoad.
     [[nodiscard]] bool Enabled();
 
+    // Plugin load, before any record is read: hooks
+    // BGSSoundDescriptorForm::SetFormEditorID to note the names the engine
+    // does not keep.
+    void InstallNameCapture();
+
     // kDataLoaded, game thread: indexes the sound descriptors (name, plugin)
     // and hooks BGSStandardSoundDef::DoResolve.
     void Install();

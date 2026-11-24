@@ -69,6 +69,10 @@ SKSEPluginLoad(const SKSE::LoadInterface* a_skse)
         return false;
     }
 
+    if (QAS::NowPlaying::Enabled()) {
+        QAS::NowPlaying::InstallNameCapture();
+    }
+
     SKSE::GetMessagingInterface()->RegisterListener(MessageHandler);
     return true;
 }

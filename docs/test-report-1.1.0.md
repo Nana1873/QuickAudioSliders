@@ -96,10 +96,16 @@ Weather sounds: 27 descriptor(s) listed by 214 weather(s) as precipitation / thu
 
 Neu aufgefallen im zweiten Durchlauf:
 
-- **„Now Playing" zeigt keine Sound-Namen**, auch nicht in der 1.7.104-Liste
+- **„Now Playing" zeigte keine Sound-Namen**, auch nicht in der 1.7.104-Liste
   mit Native EditorID Fix: `GetFormEditorID()` liefert für Sound-Deskriptoren
-  dort nichts, also steht überall `Skyrim.esm|03F8CE`. Die Spalten Mod und
-  Regler stimmen, aber ohne Namen ist die Seite nur halb so nützlich.
+  dort nichts, also stand überall `Skyrim.esm|03F8CE`. **Danach behoben:** Das
+  Spiel behält die Namen nicht, das Plugin schreibt sie jetzt beim Laden der
+  Records selbst mit. Nachgetestet auf beiden Laufzeiten:
+  `Now Playing: 3297 of 3297 sound descriptor(s) have a name` (1.6.1170) und
+  `3338 of 3338` (1.7.104); die Seite zeigt dort Namen wie
+  `AMBrWindForestPineGustB01`, `NPCDogBarkDistantSD`,
+  `FSTPlayerDirtJumpDownSD`. Diese zwei Läufe kamen nach den 25 Spielstarts
+  dazu; die übrigen Tests wurden mit diesem letzten Stand nicht wiederholt.
 - Derselbe Vanilla-Deskriptor `0003D09F` zählt mit Vanilla-Wetter als Regen
   („Rain (weather)") und mit Cathedral als Wind („Wind (weather, Ambience)"),
   weil die Wetter-Records ihn unterschiedlich einstufen.
