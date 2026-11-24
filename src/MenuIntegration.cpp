@@ -34,6 +34,10 @@ namespace
         }
         if (ImGuiMCP::IsItemDeactivatedAfterEdit()) {
             QAS::Audio::Persist(a_index);
+        } else if (entry.dirty.load() && !ImGuiMCP::IsItemActive()) {
+            // The release was missed (menu closed mid-drag, input path that
+            // never reports "deactivated after edit"): store the value now.
+            QAS::Audio::Persist(a_index);
         }
         ImGuiMCP::PopID();
     }
@@ -139,6 +143,8 @@ namespace
             }
             if (ImGuiMCP::IsItemDeactivatedAfterEdit()) {
                 QAS::Audio::PersistGlobal();
+            } else if (QAS::Audio::GlobalDirty() && !ImGuiMCP::IsItemActive()) {
+                QAS::Audio::PersistGlobal();  // missed release, see RenderSlider
             }
             ImGuiMCP::SameLine();
             RenderResetAll();

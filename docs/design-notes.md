@@ -586,3 +586,75 @@ on 1.0.2) was not reproduced; likely a missing / disabled / overridden VSfW
 Cathedral patch on their side (asked for their load order). 1.0.3 stays in
 the repo but is not released separately; the README says so next to the
 version number.
+
+## The plugin INI owns every volume (1.1.0, 2026-11-24)
+
+Nexus report (imAurorangel, 1.0.2, MO2 + Root Builder list, SkyrimPrefs.ini
+under OneDrive): "I set my general volume slider to 25%, when I reopen the
+game it goes back to 100%". Their log covers only the start after the
+restart: an existing, complete plugin INI, yet no `[Volumes]` value at all
+("no stored volume" for all 175 sliders, no "Restored global multiplier"),
+Vanilla master 1.0. Music, FlowerGirls SFX, Word Walls and SkyParkour start at
+0.2 although none has an engine slot and the plugin restored nothing, so
+another plugin restores volumes there, almost certainly Engine Fixes. Not
+known from that log: whether "general volume" is our global slider or the
+Vanilla master, and why nothing reached `[Volumes]` (the session that changed
+the slider had been overwritten). NOT reproduced; the changes below remove the
+gaps the report can have fallen into. Nothing of this was built or run when it
+was written (no Windows toolchain in that session): build and test in the lab
+before release.
+
+Engine Fixes, read from its source (master, 7.0.21,
+`src/patches/save_added_sound_categories.cpp`, `src/main.cpp`): at
+`kDataLoaded` it calls `SetCategoryVolume` for every category that has an
+entry in `Data/SKSE/Plugins/EngineFixes_SNCT.ini` (section = plugin file, key
+= local FormID as 8 hex digits); it saves `volumeMult` of every category with
+the menu flag, Vanilla ones included, whenever
+`INIPrefSettingCollection::Unlock` runs. Consequences for the old design:
+
+- Engine-slot categories were left to the engine's restore, so a stale
+  Engine Fixes entry (or a SkyrimPrefs.ini that is not saved) won over the
+  value the plugin had written.
+- While the global multiplier is active, a root that is also a menu slider
+  holds baseline x global in `volumeMult`; Engine Fixes saves that scaled
+  value. If our `GlobalMultiplier` is then missing, the root stays scaled
+  (matches the three roots at 0.2 in the log, though 20% can also be the
+  user's own setting).
+
+Changes:
+
+- The store (`[Volumes]`) is applied to EVERY slider at startup, in the task
+  one frame after `kDataLoaded`, i.e. after Engine Fixes. Supersedes "Categories
+  in engine slots keep the engine's own restore" above. A restored engine-slot
+  category also gets its `uID<n>` / `fVal<n>` written, so the Vanilla menu
+  agrees.
+- Migration, once (`StoreOwnsAllVolumes` marker): older versions never
+  noticed Vanilla-menu changes, so for engine-slot categories a stored value
+  is trusted only where it equals the engine's `fVal<n>`; otherwise the
+  current value is taken over.
+- Changes made elsewhere are adopted: when the Journal Menu closes
+  (`MenuOpenCloseEvent`), every menu slider whose value differs from
+  `Entry::savedVolume` is written to the store. Extra Sliders are left out (a
+  mod may duck its own hidden category temporarily). Not covered: a root menu
+  category changed in the Vanilla menu while the global multiplier is active.
+- Vanilla master: no slider, but `VanillaMaster` is stored (adopted at
+  Journal close, written by Reset All and the startup repair) and re-applied
+  at startup when it differs from `fAudioMasterVolume`. Assumes
+  `BSAudioManager::masterVolume` equals the setting value for values other
+  than 1.0 (the old code only ever wrote 1.0): check in-game.
+- Every store write is read back. If the plugin INI does not take the value,
+  it goes to `<My Games>/SKSE/QuickAudioSliders.ini`; a key present there
+  wins on read and is removed once the plugin INI accepts a write again.
+- `PersistGlobal` also stores the baseline of roots that are menu sliders.
+- A slider that was moved but never reported "deactivated after edit" is
+  persisted on the next frame it is inactive, or when any menu closes
+  (`Entry::dirty`, `FlushDirty`).
+- Support: the previous log is kept as `QuickAudioSliders.prev.log`; startup
+  logs the store paths with their line counts; the 150-odd "no stored volume"
+  lines became one summary line.
+
+Test list for the lab: fresh INI; INI from 1.0.2 with and without changes made
+in the Vanilla menu since; change in the Vanilla menu then restart; with and
+without Engine Fixes (stale `EngineFixes_SNCT.ini`); plugin INI read-only;
+global multiplier with a root menu category (SkyParkour, Word Walls); Vanilla
+master at 50% across a restart; Reset All.

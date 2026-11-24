@@ -13,6 +13,14 @@ namespace
             SKSE::stl::report_and_fail("Failed to find standard logging directory"sv);
         }
         const auto* plugin = SKSE::PluginDeclaration::GetSingleton();
+        // Keep the previous session's log: a "my sliders reverted" report
+        // needs the session that changed them, and the log is truncated on
+        // every start.
+        {
+            std::error_code ec;
+            const auto      previous = *path / std::format("{}.prev.log", plugin->GetName());
+            std::filesystem::rename(*path / std::format("{}.log", plugin->GetName()), previous, ec);
+        }
         *path /= std::format("{}.log", plugin->GetName());
         auto sink = std::make_shared<spdlog::sinks::basic_file_sink_mt>(path->string(), true);
         auto log = std::make_shared<spdlog::logger>("global log"s, std::move(sink));

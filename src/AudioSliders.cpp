@@ -22,13 +22,22 @@ namespace
     constexpr auto kSrdFolderRelative = "Data/SKSE/Plugins/SoundRecordDistributor";
     constexpr auto kGlobalKey = "GlobalMultiplier";    // [Volumes] key of the "Alle Sounds" slider
     constexpr auto kMasterRepairedKey = "MasterRepaired";  // [Volumes] marker: startup master repair done once
+    constexpr auto kOwnsAllKey = "StoreOwnsAllVolumes";  // [Volumes] marker: the store also restores engine-slot categories
+    constexpr auto kVanillaMasterKey = "VanillaMaster";  // [Volumes] copy of fAudioMasterVolume
     constexpr int  kEngineSlotsFallback = 8;  // assumed when no uID<n> setting is registered
+    constexpr float kVolumeEpsilon = 0.0005F;  // two volumes closer than this are the same value
 
     std::vector<std::unique_ptr<QAS::Audio::Entry>> g_entries;
     std::vector<QAS::Audio::Group>                  g_groups;
     std::atomic<bool>                               g_ready{ false };
     std::string                                     g_prefsPath;
     std::string                                     g_pluginIniPath;
+    // Second home of the volume store, used when the plugin INI cannot be
+    // written (see "volume store" below): <My Games>/SKSE/QuickAudioSliders.ini.
+    std::string                                     g_fallbackIniPath;
+    bool                                            g_fallbackActive{ false };  // the fallback file holds values
+    bool                                            g_fallbackWarned{ false };
+    float                                           g_savedMaster{ -1.0F };  // Vanilla master as last stored / found; < 0 = unknown
     int                                             g_engineSlots{ kEngineSlotsFallback };
 
     float Clamp01(float a_value);
@@ -53,6 +62,7 @@ namespace
     std::vector<RootCategory> g_roots;
     std::atomic<float>        g_global{ 1.0F };
     std::atomic<bool>         g_globalActive{ false };
+    std::atomic<bool>         g_globalDirty{ false };  // SetGlobal() without PersistGlobal() yet
 
     constexpr float kGlobalIdentity = 0.9995F;  // >= this counts as 100%
 
@@ -641,10 +651,11 @@ namespace
             nullptr, 0 },
         { "Volumes"sv,
             "[Volumes]\n"
-            "; Persistence store written by the plugin on slider release: volumes of\n"
-            "; categories without an engine [AudioMenu] slot, GlobalMultiplier, runtime\n"
-            "; mod categories (mod:<plugin>|<parent FormID>) and the MasterRepaired\n"
-            "; marker. Managed by the plugin - do not edit manually."sv,
+            "; Persistence store written by the plugin: the volume of every slider\n"
+            "; (<plugin>|<local FormID>, runtime mod categories as\n"
+            "; mod:<plugin>|<parent FormID>), GlobalMultiplier, VanillaMaster and\n"
+            "; internal markers. Applied on every game start. Managed by the plugin -\n"
+            "; do not edit manually."sv,
             nullptr, 0 },
     };
 
@@ -884,42 +895,128 @@ namespace
         }
     }
 
-    std::optional<float> ReadPluginVolume(const std::string& a_key)
+    // ---- volume store ----
+    //
+    // [Volumes] of the plugin INI is the source of truth for every slider,
+    // the global multiplier and the Vanilla master: values are written on
+    // every change and applied at kDataLoaded, after the engine and other
+    // plugins restored theirs. Every write is read back. A plugin INI that
+    // does not take the value (read-only file, a mod manager's virtual file
+    // system, antivirus) is replaced by the fallback file next to the SKSE
+    // logs, key by key: a key present in the fallback is newer than the same
+    // key in the plugin INI, and is removed from the fallback as soon as the
+    // plugin INI accepts a write for it again.
+
+    std::string ReadStoreString(const std::string& a_path, const std::string& a_key)
     {
-        if (g_pluginIniPath.empty() || a_key.empty()) {
-            return std::nullopt;
+        if (a_path.empty() || a_key.empty()) {
+            return {};
         }
         char buffer[32]{};
-        GetPrivateProfileStringA(kVolumesSection, a_key.c_str(), "", buffer, sizeof(buffer), g_pluginIniPath.c_str());
-        if (buffer[0] == '\0') {
+        GetPrivateProfileStringA(kVolumesSection, a_key.c_str(), "", buffer, sizeof(buffer), a_path.c_str());
+        return buffer;
+    }
+
+    std::optional<float> ParseStoreVolume(const std::string& a_text, const std::string& a_key, const std::string& a_path)
+    {
+        if (a_text.empty()) {
             return std::nullopt;
         }
         // std::from_chars, not strtof: strtof parses through the C locale,
         // which another plugin in the process may have changed (a "0.9500"
         // read as 0.0 would silently mute everything restored).
         float      value = 0.0F;
-        const auto result = std::from_chars(buffer, buffer + std::string_view{ buffer }.size(), value);
+        const auto result = std::from_chars(a_text.data(), a_text.data() + a_text.size(), value);
         if (result.ec != std::errc{} || !std::isfinite(value)) {
-            logs::warn("[{}] {} = '{}' in '{}' is not a number; ignored", kVolumesSection, a_key, buffer, g_pluginIniPath);
+            logs::warn("[{}] {} = '{}' in '{}' is not a number; ignored", kVolumesSection, a_key, a_text, a_path);
             return std::nullopt;
         }
         return Clamp01(value);
     }
 
-    bool WritePluginVolume(const std::string& a_key, float a_volume)
+    std::optional<float> ReadPluginVolume(const std::string& a_key)
     {
-        if (g_pluginIniPath.empty() || a_key.empty()) {
+        if (g_fallbackActive) {
+            if (const auto value = ParseStoreVolume(ReadStoreString(g_fallbackIniPath, a_key), a_key, g_fallbackIniPath)) {
+                return value;
+            }
+        }
+        return ParseStoreVolume(ReadStoreString(g_pluginIniPath, a_key), a_key, g_pluginIniPath);
+    }
+
+    // Writes one [Volumes] line and reads it back; false when the file did
+    // not take the value.
+    bool WriteStoreString(const std::string& a_path, const std::string& a_key, const std::string& a_text)
+    {
+        if (a_path.empty() || a_key.empty()) {
             return false;
         }
-        std::error_code ec;
-        const auto      path = std::filesystem::path(g_pluginIniPath);
-        if (!std::filesystem::exists(path, ec)) {
-            // First write without a file (deleted since startup): recreate the
-            // commented template so the key lands in a self-documenting file.
-            EnsurePluginIni();
+        const bool          written = WritePrivateProfileStringA(kVolumesSection, a_key.c_str(), a_text.c_str(), a_path.c_str()) != 0;
+        const unsigned long error = written ? 0UL : static_cast<unsigned long>(GetLastError());
+        if (written && ReadStoreString(a_path, a_key) == a_text) {
+            return true;
         }
-        return WritePrivateProfileStringA(kVolumesSection, a_key.c_str(), std::format("{:.4f}", a_volume).c_str(),
-                   g_pluginIniPath.c_str()) != 0;
+        logs::warn("[{}] {} = {} was not stored in '{}' ({})", kVolumesSection, a_key, a_text, a_path,
+            written ? "the value read back differs" : std::format("write failed, Windows error {}", error));
+        return false;
+    }
+
+    bool WritePluginVolume(const std::string& a_key, float a_volume)
+    {
+        if (a_key.empty()) {
+            return false;
+        }
+        const auto text = std::format("{:.4f}", a_volume);
+        if (!g_pluginIniPath.empty()) {
+            std::error_code ec;
+            if (!std::filesystem::exists(std::filesystem::path(g_pluginIniPath), ec)) {
+                // First write without a file (deleted since startup): recreate the
+                // commented template so the key lands in a self-documenting file.
+                EnsurePluginIni();
+            }
+            if (WriteStoreString(g_pluginIniPath, a_key, text)) {
+                if (g_fallbackActive) {
+                    // The plugin INI holds the newest value again.
+                    WritePrivateProfileStringA(kVolumesSection, a_key.c_str(), nullptr, g_fallbackIniPath.c_str());
+                }
+                return true;
+            }
+        }
+        if (g_fallbackIniPath.empty()) {
+            return false;
+        }
+        if (!g_fallbackWarned) {
+            g_fallbackWarned = true;
+            logs::warn("The plugin INI '{}' does not accept values; storing them in '{}' instead", g_pluginIniPath,
+                g_fallbackIniPath);
+        }
+        if (WriteStoreString(g_fallbackIniPath, a_key, text)) {
+            g_fallbackActive = true;
+            return true;
+        }
+        return false;
+    }
+
+    // Number of "key=value" lines in [Volumes] of a store file, for the
+    // startup log.
+    std::size_t CountStoreValues(const std::string& a_path)
+    {
+        if (a_path.empty()) {
+            return 0;
+        }
+        std::vector<char> buffer(32767, '\0');
+        const auto        length = GetPrivateProfileSectionA(kVolumesSection, buffer.data(), static_cast<unsigned long>(buffer.size()),
+            a_path.c_str());
+        std::size_t count = 0;
+        for (std::size_t i = 0; i < length;) {
+            const std::string_view line{ buffer.data() + i };
+            if (line.empty()) {
+                break;
+            }
+            ++count;
+            i += line.size() + 1;
+        }
+        return count;
     }
 
     // The engine registers uID0..uID7 as settings and leaves unused slots at
@@ -960,16 +1057,24 @@ namespace
     // leave it at 0 (and so can the Vanilla menu). Restoring it to 100% is
     // part of "reset all", and done once at startup when it is found at 0,
     // so nobody stays in a silent game without a visible reason.
-    void RestoreVanillaMaster(const char* a_reason)
+    void ApplyVanillaMaster(float a_value)
     {
         if (auto* setting = FindPref(kMasterSetting)) {
-            setting->data.f = 1.0F;
+            setting->data.f = a_value;
         }
         if (auto* audio = RE::BSAudioManager::GetSingleton()) {
-            audio->masterVolume = 1.0F;
+            audio->masterVolume = a_value;
         }
         BroadcastVolumeChanged();
-        WriteFloatPref("fAudioMasterVolume", 1.0F);
+        WriteFloatPref("fAudioMasterVolume", a_value);
+    }
+
+    void RestoreVanillaMaster(const char* a_reason)
+    {
+        ApplyVanillaMaster(1.0F);
+        if (WritePluginVolume(kVanillaMasterKey, 1.0F)) {
+            g_savedMaster = 1.0F;
+        }
         logs::info("Vanilla master volume restored to 100% ({})", a_reason);
     }
 
@@ -1398,6 +1503,101 @@ namespace
         }
         BroadcastVolumeChanged();
     }
+
+    bool HasEngineSlot(const QAS::Audio::Entry& a_entry)
+    {
+        return !a_entry.synthetic && a_entry.slot >= 0 && a_entry.slot < g_engineSlots;
+    }
+
+    // Game thread. A menu slider (or the Vanilla master) that no longer has
+    // the value the plugin stored was changed somewhere else, in practice in
+    // Settings > Audio: take the new value into the store, otherwise the next
+    // start would put the old one back. Called when the Journal Menu closes.
+    // "Extra Sliders" are left out: nothing but this plugin offers them, and a
+    // mod may duck its own hidden category temporarily.
+    void AdoptExternalChanges()
+    {
+        if (!g_ready.load()) {
+            return;
+        }
+        std::size_t adopted = 0;
+        for (auto& entryPtr : g_entries) {
+            auto& entry = *entryPtr;
+            if (entry.synthetic || entry.pending.load() || entry.dirty.load()) {
+                continue;
+            }
+            const float current = QAS::Audio::ReadVolume(entry);
+            if (std::abs(current - entry.savedVolume) <= kVolumeEpsilon) {
+                continue;
+            }
+            const auto key = PluginIniKey(entry);
+            if (key.empty()) {
+                continue;
+            }
+            const bool ok = WritePluginVolume(key, current);
+            logs::info("Adopted {:08X} '{}' key '{}': {:.4f} -> {:.4f}, changed outside this plugin ({})", entry.formID,
+                entry.label, key, entry.savedVolume, current, ok ? "stored" : "NOT STORED");
+            entry.savedVolume = current;
+            entry.uiVolume = current;
+            ++adopted;
+        }
+        if (const auto* setting = FindPref(kMasterSetting)) {
+            const float master = Clamp01(setting->data.f);
+            if (g_savedMaster < 0.0F || std::abs(master - g_savedMaster) > kVolumeEpsilon) {
+                const bool ok = WritePluginVolume(kVanillaMasterKey, master);
+                logs::info("Adopted Vanilla master: {:.4f} -> {:.4f} ({})", g_savedMaster, master, ok ? "stored" : "NOT STORED");
+                g_savedMaster = master;
+                ++adopted;
+            }
+        }
+        if (adopted > 0) {
+            logs::info("{} value(s) changed outside this plugin taken into the volume store", adopted);
+        }
+    }
+
+    // Any menu closing stores sliders that were moved but never persisted;
+    // the Journal Menu (Settings > Audio) closing also adopts what the
+    // Vanilla menu changed.
+    class MenuCloseSink final : public RE::BSTEventSink<RE::MenuOpenCloseEvent>
+    {
+    public:
+        RE::BSEventNotifyControl ProcessEvent(const RE::MenuOpenCloseEvent* a_event,
+            RE::BSTEventSource<RE::MenuOpenCloseEvent>*) override
+        {
+            if (a_event && !a_event->opening && g_ready.load()) {
+                const char* name = a_event->menuName.c_str();
+                const bool  journal = name && std::string_view{ name } == "Journal Menu"sv;
+                if (auto* tasks = SKSE::GetTaskInterface()) {
+                    tasks->AddTask([journal]() {
+                        QAS::Audio::FlushDirty();
+                        if (!journal) {
+                            return;
+                        }
+                        // Queued behind the persist tasks FlushDirty() added.
+                        if (auto* later = SKSE::GetTaskInterface()) {
+                            later->AddTask([]() { AdoptExternalChanges(); });
+                        }
+                    });
+                }
+            }
+            return RE::BSEventNotifyControl::kContinue;
+        }
+    };
+
+    void RegisterMenuCloseSink()
+    {
+        static MenuCloseSink sink;
+        static bool          registered = false;
+        if (registered) {
+            return;
+        }
+        if (auto* ui = RE::UI::GetSingleton()) {
+            ui->AddEventSink<RE::MenuOpenCloseEvent>(&sink);
+            registered = true;
+        } else {
+            logs::warn("UI singleton unavailable; changes made in the Vanilla audio menu are not taken into the store");
+        }
+    }
 }
 
 namespace QAS::Audio
@@ -1410,11 +1610,14 @@ namespace QAS::Audio
         logs::info("Preference INI: '{}'", g_prefsPath);
 
         // The Vanilla master (fAudioMasterVolume / BSAudioManager::masterVolume)
-        // is left to the Vanilla menu; the "Alle Sounds" multiplier covers
-        // every root category instead. Logged for diagnostics only.
-        bool repairMaster = false;
+        // has no slider here (the "Alle Sounds" multiplier covers every root
+        // category instead), but its value is kept in the volume store like
+        // the sliders', so it survives a SkyrimPrefs.ini that is not saved.
+        bool  repairMaster = false;
+        float currentMaster = -1.0F;
         if (const auto* setting = FindPref(kMasterSetting)) {
-            logs::info("Vanilla master (not managed here): {} = {:.4f}", kMasterSetting, setting->data.f);
+            currentMaster = Clamp01(setting->data.f);
+            logs::info("Vanilla master: {} = {:.4f}", kMasterSetting, setting->data.f);
             repairMaster = setting->data.f <= 0.0F;
         }
 
@@ -1446,8 +1649,16 @@ namespace QAS::Audio
         }
         g_pluginIniPath = ResolvePluginIniPath();
         EnsurePluginIni();
-        logs::info("Categories from slot {} on are persisted in '{}' and restored by this plugin",
-            g_engineSlots, g_pluginIniPath);
+        g_fallbackIniPath.clear();
+        g_fallbackActive = false;
+        if (auto logDir = SKSE::log::log_directory()) {
+            std::error_code ec;
+            g_fallbackIniPath = (*logDir / "QuickAudioSliders.ini").string();
+            g_fallbackActive = std::filesystem::exists(std::filesystem::path(g_fallbackIniPath), ec);
+        }
+        logs::info("Volume store: '{}' with {} [Volumes] line(s); fallback '{}' {}", g_pluginIniPath,
+            CountStoreValues(g_pluginIniPath), g_fallbackIniPath,
+            g_fallbackActive ? std::format("with {} line(s)", CountStoreValues(g_fallbackIniPath)) : "not in use"s);
         const bool modCategoriesEnabled = ReadIniInt(kModCategoriesSection, QAS::Ini::kModCategoriesEnabledKey,
                                               QAS::Ini::kModCategoriesEnabledDefault ? 1 : 0) != 0;
         const int  modCategoriesMinSounds = ReadIniInt(kModCategoriesSection, "MinSounds", 3);
@@ -1500,26 +1711,62 @@ namespace QAS::Audio
             CreateModCategories();
         }
 
-        // Categories without an engine slot (and runtime categories): restore
-        // from the plugin INI.
-        std::vector<std::pair<std::size_t, float>> restores;
+        // Every slider is restored from the volume store. An INI written by
+        // a version before the store owned the engine-slot categories can be
+        // older than SkyrimPrefs.ini for those (the Vanilla menu changed
+        // them without the plugin noticing): on the first start of this
+        // version a stored value is only trusted where it matches the
+        // engine's fVal<n>, otherwise the current value is taken over.
+        struct Restore
+        {
+            std::size_t index;
+            float       volume;
+            float       found;
+        };
+        const bool           ownsAll = ReadPluginVolume(kOwnsAllKey).has_value();
+        std::vector<Restore> restores;
+        std::size_t          withoutValue = 0;
         for (std::size_t index = 0; index < g_entries.size(); ++index) {
-            auto& entry = *g_entries[index];
-            if (!entry.synthetic && entry.slot < g_engineSlots) {
-                continue;
-            }
+            auto&       entry = *g_entries[index];
+            const float current = ReadVolume(entry);
+            entry.savedVolume = current;
             const auto key = PluginIniKey(entry);
             if (key.empty()) {
                 logs::warn("Category {:08X} '{}' has no defining file; cannot persist it", entry.formID, entry.editorID);
                 continue;
             }
-            if (const auto volume = ReadPluginVolume(key)) {
-                entry.uiVolume = *volume;
-                restores.emplace_back(index, *volume);
-            } else {
-                logs::info("Category {:08X} '{}' (slot {}) key '{}': no stored volume", entry.formID, entry.label,
-                    entry.slot, key);
+            const auto stored = ReadPluginVolume(key);
+            if (!stored) {
+                ++withoutValue;
+                continue;
             }
+            if (!ownsAll && HasEngineSlot(entry)) {
+                const auto* slotValue = FindPref(std::format("fVal{}:{}", entry.slot, kSection));
+                if (!slotValue || std::abs(slotValue->data.f - *stored) > kVolumeEpsilon) {
+                    const bool ok = WritePluginVolume(key, current);
+                    logs::info("Category {:08X} '{}' (slot {}) key '{}': stored {:.4f} predates SkyrimPrefs.ini, "
+                               "taking over the current {:.4f} ({})",
+                        entry.formID, entry.label, entry.slot, key, *stored, current, ok ? "stored" : "NOT STORED");
+                    continue;
+                }
+            }
+            entry.uiVolume = *stored;
+            entry.savedVolume = *stored;
+            restores.push_back(Restore{ index, *stored, current });
+        }
+        logs::info("{} slider(s) have a stored volume, {} have none yet (they keep the value found at startup)",
+            restores.size(), withoutValue);
+        if (!ownsAll) {
+            WritePluginVolume(kOwnsAllKey, 1.0F);
+        }
+
+        // Vanilla master: a stored value wins over what the engine loaded.
+        const auto storedMaster = ReadPluginVolume(kVanillaMasterKey);
+        g_savedMaster = storedMaster.value_or(currentMaster);
+        const bool restoreMaster =
+            storedMaster && currentMaster >= 0.0F && std::abs(*storedMaster - currentMaster) > kVolumeEpsilon;
+        if (storedMaster) {
+            repairMaster = false;  // the store decides, including a deliberate 0
         }
 
         BuildGroups();
@@ -1538,25 +1785,51 @@ namespace QAS::Audio
             logs::info("Vanilla master is 0 but was repaired once before; leaving it to the Vanilla menu");
             repairMaster = false;
         }
-        auto applyRestores = [restores = std::move(restores), savedGlobal, repairMaster]() {
+        auto applyRestores = [restores = std::move(restores), savedGlobal, repairMaster, restoreMaster, storedMaster]() {
             if (repairMaster) {
                 RestoreVanillaMaster("startup repair: fAudioMasterVolume was 0");
                 WritePluginVolume(kMasterRepairedKey, 1.0F);
+            } else if (restoreMaster) {
+                ApplyVanillaMaster(*storedMaster);
+                logs::info("Vanilla master restored to {:.4f} from the volume store", *storedMaster);
             }
             RepointModDescriptors();
-            for (const auto& [index, volume] : restores) {
-                auto& entry = *g_entries[index];
-                ApplyNow(entry, volume);
-                logs::info("Restored {:08X} {} '{}' (slot {}) key '{}' volume {:.4f} from '{}'", entry.formID,
-                    entry.editorID, entry.label, entry.slot, PluginIniKey(entry), volume, g_pluginIniPath);
+            std::size_t overridden = 0;
+            for (const auto& restore : restores) {
+                auto& entry = *g_entries[restore.index];
+                // What the category holds now, after every kDataLoaded
+                // listener ran (Engine Fixes applies its own file there).
+                const float before = entry.category->volumeMult;
+                const bool  differs = std::abs(before - restore.volume) > kVolumeEpsilon ||
+                                     std::abs(restore.found - restore.volume) > kVolumeEpsilon;
+                ApplyNow(entry, restore.volume);
+                if (!differs) {
+                    continue;
+                }
+                ++overridden;
+                logs::info("Restored {:08X} {} '{}' (slot {}) key '{}' volume {:.4f} (was {:.4f})", entry.formID,
+                    entry.editorID, entry.label, entry.slot, PluginIniKey(entry), restore.volume, before);
+                if (HasEngineSlot(entry)) {
+                    // Keep [AudioMenu] in step, so the Vanilla menu shows the
+                    // restored value and the engine saves it from now on.
+                    WriteUIntPref(std::format("uID{}", entry.slot), entry.formID);
+                    WriteFloatPref(std::format("fVal{}", entry.slot), restore.volume);
+                }
             }
+            logs::info("{} of {} stored volume(s) differed from what the game had loaded", overridden, restores.size());
             if (savedGlobal) {
                 g_global.store(*savedGlobal);
                 ApplyGlobalNow(*savedGlobal);
                 logs::info("Restored global multiplier {:.4f} from '{}'", *savedGlobal, g_pluginIniPath);
             }
-            logs::info("{} volume(s) restored from the plugin INI; sliders ready", restores.size());
+            // Baseline for "changed outside this plugin": what every slider
+            // holds now that all kDataLoaded listeners and the store ran.
+            for (auto& entry : g_entries) {
+                entry->savedVolume = ReadVolume(*entry);
+            }
+            logs::info("{} volume(s) applied from the volume store; sliders ready", restores.size());
             g_ready.store(true);
+            RegisterMenuCloseSink();
         };
         if (auto* tasks = SKSE::GetTaskInterface()) {
             tasks->AddTask(std::move(applyRestores));
@@ -1579,19 +1852,54 @@ namespace QAS::Audio
     {
         const auto multiplier = Clamp01(a_multiplier);
         g_global.store(multiplier);
+        g_globalDirty.store(true);
         if (auto* tasks = SKSE::GetTaskInterface()) {
             tasks->AddTask([multiplier]() { ApplyGlobalNow(multiplier); });
+        }
+    }
+
+    bool GlobalDirty()
+    {
+        return g_globalDirty.load();
+    }
+
+    void FlushDirty()
+    {
+        for (std::size_t index = 0; index < g_entries.size(); ++index) {
+            if (g_entries[index]->dirty.load() && !g_entries[index]->pending.load()) {
+                logs::info("Storing '{}' now: it was moved but never released", g_entries[index]->label);
+                Persist(index);
+            }
+        }
+        if (g_globalDirty.load()) {
+            PersistGlobal();
         }
     }
 
     void PersistGlobal()
     {
         const auto multiplier = Clamp01(g_global.load());
+        g_globalDirty.store(false);
         if (auto* tasks = SKSE::GetTaskInterface()) {
             tasks->AddTask([multiplier]() {
                 const auto ok = WritePluginVolume(kGlobalKey, multiplier);
-                logs::info("Persisted [{}] {} = {:.4f} to '{}' ({})", kVolumesSection, kGlobalKey, multiplier,
-                    g_pluginIniPath, ok ? "ok" : "FAILED");
+                logs::info("Persisted [{}] {} = {:.4f} ({})", kVolumesSection, kGlobalKey, multiplier,
+                    ok ? "ok" : "FAILED");
+                // A root that is also a menu slider carries baseline x global
+                // in volumeMult, and other plugins (Engine Fixes) save that
+                // scaled value. Store the baseline, so the next start puts it
+                // back before the multiplier is applied again.
+                for (auto& entryPtr : g_entries) {
+                    auto& entry = *entryPtr;
+                    if (entry.synthetic || !FindRoot(entry.category)) {
+                        continue;
+                    }
+                    const auto  key = PluginIniKey(entry);
+                    const float baseline = ReadVolume(entry);
+                    if (!key.empty() && WritePluginVolume(key, baseline)) {
+                        entry.savedVolume = baseline;
+                    }
+                }
             });
         }
     }
@@ -1671,6 +1979,7 @@ namespace QAS::Audio
         auto&      entry = *g_entries[a_index];
         const auto volume = Clamp01(a_volume);
         entry.uiVolume = volume;
+        entry.dirty.store(true);
         entry.pending.store(true);
         if (auto* tasks = SKSE::GetTaskInterface()) {
             tasks->AddTask([a_index, volume]() {
@@ -1723,20 +2032,20 @@ namespace QAS::Audio
             return;
         }
         const auto volume = Clamp01(g_entries[a_index]->uiVolume);
+        g_entries[a_index]->dirty.store(false);
         if (auto* tasks = SKSE::GetTaskInterface()) {
             tasks->AddTask([a_index, volume]() {
                 auto& entry = *g_entries[a_index];
                 ApplyNow(entry, volume);
-                // Plugin INI for every category, so the value follows the
-                // category even if a later load order moves it out of an
-                // engine slot. Restored only for categories without a slot.
+                // The volume store holds every slider and is what the next
+                // start applies.
                 if (const auto key = PluginIniKey(entry); !key.empty()) {
                     const auto ok = WritePluginVolume(key, volume);
-                    logs::info("Persisted [{}] {} = {:.4f} to '{}' ({})", kVolumesSection, key, volume,
-                        g_pluginIniPath, ok ? "ok" : "FAILED");
+                    logs::info("Persisted [{}] {} = {:.4f} ({})", kVolumesSection, key, volume, ok ? "ok" : "FAILED");
                 }
-                if (entry.synthetic || entry.slot >= g_engineSlots) {
-                    return;  // no engine slot: the plugin INI is the only store
+                entry.savedVolume = volume;
+                if (!HasEngineSlot(entry)) {
+                    return;  // no engine slot: nothing to mirror
                 }
                 // Always write the uID line too: the engine re-assigns free
                 // slots in memory at startup (InitItemImpl) without writing

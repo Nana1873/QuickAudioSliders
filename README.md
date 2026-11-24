@@ -1,7 +1,7 @@
 # Quick Audio Sliders
 
-**Version 1.0.3** (repo only, not released separately; the latest Nexus
-download is 1.0.2)
+**Version 1.1.0** (not released yet; the latest Nexus download is 1.0.2.
+1.0.3 was never released separately and is part of 1.1.0)
 
 SKSE plugin for Skyrim SE/AE: an in-game volume panel rendered through
 [SKSE Menu Framework](https://www.nexusmods.com/skyrimspecialedition/mods/120352).
@@ -14,20 +14,26 @@ their sounds through vanilla categories and have no slider of their own
 - Changes apply live through `BSISoundCategory::SetCategoryVolume` plus the
   engine's VolumeChanged broadcast, the same path the Vanilla slider uses;
   sounds already playing follow immediately. No INI reload tricks.
-- An "All Sounds (global)" slider on top scales every root sound category (menu-visible or not); saved in the plugin INI and applied on startup. The Vanilla master is left to the Vanilla menu (with a one-time stuck-at-0 repair).
+- An "All Sounds (global)" slider on top scales every root sound category (menu-visible or not); saved in the plugin INI and applied on startup. The Vanilla master has no slider here, but its value is kept in the plugin INI too and put back on startup (plus a one-time stuck-at-0 repair).
 - Mods contributing a single slider are pooled into an "Other Mods" group with a mod-name prefix.
 - "Reset" per slider and a two-click "Reset All" button restore the SNCT default menu values (UNAM) and global to 100%.
 - Groups are flat, always-visible section headings (Vanilla first, "Other Mods" last).
-- Values are persisted to `SkyrimPrefs.ini` `[AudioMenu]`
-  (`fVal<n>` / `uID<n>` per category slot, keyed by
-  the category's runtime FormID like the Vanilla menu does), so they survive
-  restarts and stay consistent with the Vanilla menu.
-- The engine only keeps eight `[AudioMenu]` slots (`uID0..uID7`). Categories
-  beyond that are saved by the plugin in
+- Every slider is saved by the plugin itself in
   `Data/SKSE/Plugins/QuickAudioSliders.ini` (`[Volumes]`, key
   `<plugin file>|<local FormID>`, e.g. `Audio Overhaul Skyrim.esp|00AA6E=0.5000`)
-  and re-applied at `kDataLoaded`. Load-order changes do not affect the key.
-  Under MO2 the file is created in `overwrite/SKSE/Plugins/`.
+  and re-applied on every start, after the engine and other plugins (Engine
+  Fixes' `EngineFixes_SNCT.ini`) restored theirs. Load-order changes do not
+  affect the key. Under MO2 the file is created in `overwrite/SKSE/Plugins/`.
+- Each write is read back. If the plugin INI does not take a value (read-only
+  file, virtual file system), it goes to
+  `Documents/My Games/Skyrim Special Edition/SKSE/QuickAudioSliders.ini`
+  instead, and the log says so.
+- A change made in the Vanilla Settings > Audio menu is taken into the plugin
+  INI when the Journal Menu closes, so it is not overwritten on the next start.
+- The eight categories the engine keeps in `SkyrimPrefs.ini` `[AudioMenu]`
+  (`fVal<n>` / `uID<n>`) are still written there as well, so the Vanilla menu
+  shows the same values.
+- The log of the previous session is kept as `QuickAudioSliders.prev.log`.
 - Labels come from the game's own Scaleform translation table, so `$Effects`
   shows as "Effects" / "Effekte" in the player's language.
 
