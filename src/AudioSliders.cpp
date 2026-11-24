@@ -1691,7 +1691,23 @@ namespace
             if (entry.synthetic || entry.pending.load() || entry.dirty.load()) {
                 continue;
             }
-            const float current = QAS::Audio::ReadVolume(entry);
+            float current = QAS::Audio::ReadVolume(entry);
+            // A root that is also a menu slider holds baseline x global while
+            // the multiplier is active, and ReadVolume() answers with the
+            // baseline. The Vanilla menu sets volumeMult directly: when it no
+            // longer equals baseline x global, the value divided by the
+            // multiplier is the new baseline. Not while the global slider is
+            // being dragged: g_global is then ahead of what was applied.
+            if (auto* root = FindRoot(entry.category);
+                root && g_globalActive.load(std::memory_order_relaxed) && !g_globalDirty.load()) {
+                const float global = g_global.load();
+                const float actual = Clamp01(entry.category->volumeMult);
+                const float baseline = root->baseline.load(std::memory_order_relaxed);
+                if (global > kVolumeEpsilon && std::abs(actual - Clamp01(baseline * global)) > kVolumeEpsilon) {
+                    current = Clamp01(actual / global);
+                    root->baseline.store(current, std::memory_order_relaxed);
+                }
+            }
             if (std::abs(current - entry.savedVolume) <= kVolumeEpsilon) {
                 continue;
             }
@@ -1894,6 +1910,7 @@ namespace QAS::Audio
             float       found;
         };
         const bool           ownsAll = ReadPluginVolume(kOwnsAllKey).has_value();
+        const auto           migrationGlobal = ReadPluginVolume(kGlobalKey);
         std::vector<Restore> restores;
         std::size_t          withoutValue = 0;
         for (std::size_t index = 0; index < g_entries.size(); ++index) {
@@ -1912,11 +1929,33 @@ namespace QAS::Audio
             }
             if (!ownsAll && HasEngineSlot(entry)) {
                 const auto* slotValue = FindPref(std::format("fVal{}:{}", entry.slot, kSection));
-                if (!slotValue || std::abs(slotValue->data.f - *stored) > kVolumeEpsilon) {
-                    const bool ok = WritePluginVolume(key, current);
+                // A root that is also a menu slider holds baseline x global
+                // while the multiplier is active, and the engine saves that
+                // scaled value on exit: fVal<n> then equals stored x global,
+                // and the stored baseline is still the right one.
+                const bool  scaledRoot = !entry.category->parentCategory && migrationGlobal &&
+                                         *migrationGlobal < kGlobalIdentity;
+                const float scale = scaledRoot ? *migrationGlobal : 1.0F;
+                const bool  matches =
+                    slotValue && (std::abs(slotValue->data.f - *stored) <= kVolumeEpsilon ||
+                                     (scaledRoot && (scale <= kVolumeEpsilon ||
+                                                        std::abs(slotValue->data.f - *stored * scale) <= 2.0F * kVolumeEpsilon)));
+                if (!matches) {
+                    // Changed in the Vanilla menu since. For a scaled root the
+                    // current value includes the multiplier: take it out, the
+                    // multiplier is applied again below.
+                    const float adopted = scaledRoot ? Clamp01(current / scale) : current;
+                    const bool  ok = WritePluginVolume(key, adopted);
                     logs::info("Category {:08X} '{}' (slot {}) key '{}': stored {:.4f} predates SkyrimPrefs.ini, "
-                               "taking over the current {:.4f} ({})",
-                        entry.formID, entry.label, entry.slot, key, *stored, current, ok ? "stored" : "NOT STORED");
+                               "taking over the current {:.4f}{} ({})",
+                        entry.formID, entry.label, entry.slot, key, *stored, adopted,
+                        scaledRoot ? std::format(" (found {:.4f} with the global multiplier {:.4f})", current, scale) : ""s,
+                        ok ? "stored" : "NOT STORED");
+                    if (scaledRoot) {
+                        entry.uiVolume = adopted;
+                        entry.savedVolume = adopted;
+                        restores.push_back(Restore{ index, adopted, current });
+                    }
                     continue;
                 }
             }

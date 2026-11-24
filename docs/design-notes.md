@@ -631,17 +631,30 @@ Changes:
 - Migration, once (`StoreOwnsAllVolumes` marker): older versions never
   noticed Vanilla-menu changes, so for engine-slot categories a stored value
   is trusted only where it equals the engine's `fVal<n>`; otherwise the
-  current value is taken over.
+  current value is taken over. A root that is also a menu slider (Word
+  Walls, SkyParkour) is compared against stored x `GlobalMultiplier` as well,
+  because the engine saves the scaled value on exit; when neither matches,
+  the current value divided by the multiplier becomes the baseline. Found in
+  the lab on 2026-11-24: without this, 0.8 at 50% came back as 0.4 and was
+  then halved again.
 - Changes made elsewhere are adopted: when the Journal Menu closes
   (`MenuOpenCloseEvent`), every menu slider whose value differs from
   `Entry::savedVolume` is written to the store. Extra Sliders are left out (a
-  mod may duck its own hidden category temporarily). Not covered: a root menu
-  category changed in the Vanilla menu while the global multiplier is active.
+  mod may duck its own hidden category temporarily). A root menu category
+  changed in the Vanilla menu while the global multiplier is active is
+  recognised by `volumeMult` no longer being baseline x global; the value
+  divided by the multiplier becomes the new baseline (added 2026-11-24, lab
+  test with Papyrus `SetVolume` in place of the Vanilla slider).
 - Vanilla master: no slider, but `VanillaMaster` is stored (adopted at
   Journal close, written by Reset All and the startup repair) and re-applied
-  at startup when it differs from `fAudioMasterVolume`. Assumes
-  `BSAudioManager::masterVolume` equals the setting value for values other
-  than 1.0 (the old code only ever wrote 1.0): check in-game.
+  at startup when it differs from `fAudioMasterVolume`. `masterVolume` equals
+  the setting value 1:1, confirmed in Ghidra on 1.6.1170 (2026-11-24): the
+  settings-menu handler @ 1409939b0 (case 0x1b) writes the slider value to
+  `masterVolume`, sends `VolumeChanged` (helper @ 140cb6c30) and stores the
+  same float in the setting; the audio init @ 1405d9a20 and the two reload
+  paths @ 140648b30 / 14064a400 copy the setting into `masterVolume`
+  unchanged; "defaults" @ 14064a060 sets both to 1.0. `ApplyVanillaMaster`
+  does the same three steps. Not heard in-game.
 - Every store write is read back. If the plugin INI does not take the value,
   it goes to `<My Games>/SKSE/QuickAudioSliders.ini`; a key present there
   wins on read and is removed once the plugin INI accepts a write again.
@@ -710,4 +723,20 @@ owns `activeSounds` or which lock guards it (`ownerThread` / `ownerThreadID`
 suggest the audio thread). Iterating it from the render or game thread
 without that lock can crash. Needs Ghidra on 1.6.1170: find who inserts into
 / erases from the map at +0x28 and under which lock, then decide.
+
+Ghidra, 1.6.1170, 2026-11-24 (decompiler plus a byte scan of the unpacked
+exe, because the project has no call xrefs): `BSAudioManagerThread::
+ThreadProc` @ 140cb6eb0 loops over the message pump @ 140cb3930 and the
+update @ 140cb5420. `activeSounds` is looked up in the message processor
+@ 140cb3b10, iterated in 140cb5420 / 140cb76d0 and erased from in 140cb0170
+(only caller: 140cb5420), all without any lock. The `BSReadWriteLock`
+@ 1431ca5d0 seen there guards `stateMap` (+0x58), the per-handle
+`BSSoundInfo` copy the update fills from `activeSounds`; the `BSSpinLock`
+@ 1431ca5d8 guards the message-queue swap. So `activeSounds` is owned by the
+audio thread and has no lock a plugin could take: do not iterate it from the
+game or render thread. Not established: the thread of two further call sites
+of the message processor (140caff5b, and the callback @ 140cb0400, which has
+no direct caller). A view would have to read `stateMap` under the read lock
+(no category in `BSSoundInfo` as far as the headers show) or hook the audio
+thread.
 
