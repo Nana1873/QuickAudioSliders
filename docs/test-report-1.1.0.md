@@ -46,6 +46,7 @@ kompiliert worden war.
 |---|---|---|---|
 | Frische INI | 1.7.104 | bestanden | `Created '...QuickAudioSliders.ini' (wrote the self-documenting template)`, `0 of 0 stored volume(s) differed` |
 | INI aus 1.0.2 (nachgebaut), ohne und mit Änderung | 1.7.104 | bestanden | `stored 0.3300 predates SkyrimPrefs.ini, taking over the current 0.8000 (stored)`, `1 of 4 stored volume(s) differed` |
+| Echte, lange genutzte 1.0.2-INI (Hauptliste, 68 Zeilen in `[Volumes]`, 95 Regler, mit Engine Fixes; Stand `829a822`) | 1.7.104 | bestanden | `stored 0.3300 predates SkyrimPrefs.ini, taking over the current 1.0000 (stored)` für Stimmen, sonst `50 slider(s) have a stored volume`, `0 of 50 stored volume(s) differed`, keine Warnung. Im Store geändert: nur dieser Wert, der Marker und die neuen Vorlagen-Schlüssel. Zweiter Start: `0 of 51 ... differed`, Store unverändert |
 | Engine Fixes, veraltete SNCT-Datei | 1.7.104 | bestanden | `Restored 000172A1  'Effekte' (slot 0) ... volume 0.6000 (was 0.2000)`; zweiter Start `0 of 4 ... differed` |
 | Ohne Engine Fixes | 1.6.1170 | bestanden | alle Läufe der Testinstanz |
 | QAS-INI schreibgeschützt | 1.7.104 | bestanden | `write failed, Windows error 5`, Ersatzdatei mit zwei Zeilen, zweiter Start `fallback '...' with 2 line(s)` |
@@ -60,7 +61,17 @@ kompiliert worden war.
 | „Now Playing" | beide | bestanden | Hook installiert (`... DoResolve hooked`, 3297 bis 3395 Deskriptoren), Seite füllt sich, Regler-Spalte zeigt „Effekte", „Fußstapfen", „Thunder (weather)". Namen überall nur als `Plugin|FormID`, siehe unten |
 | „Now Playing" abgeschaltet (`[NowPlaying] Enabled=0`) | 1.6.1170 | bestanden | `pages: Volume, Extra Sliders`, keine Zeile `Now Playing:` |
 | Wetter, zehn Load Orders | 1.6.1170 | bestanden | Tabelle unten; erzwungene Wetterwechsel ohne Absturz |
-| Änderung im echten Vanilla-Menü; SkyParkour; echte 1.0.2-INI; Nebenwirkungen des Umhängens | | nicht gelaufen | wie im ersten Durchlauf |
+| Änderung im echten Vanilla-Menü; Nebenwirkungen des Umhängens | | nicht gelaufen | wie im ersten Durchlauf |
+| SkyParkour als Wurzel-Kategorie mit aktivem Globalregler | | nicht gelaufen | In der Hauptliste ist SkyParkour als Wurzel-Regler vorhanden und startete sauber, der Globalregler stand dort aber auf 100 % |
+
+Die Hauptliste lief erst, nachdem der Nutzer die blockierende Mod (OSkin)
+entfernt hatte: zwei Starts mit dem Stand `829a822`, der zweite mit
+erzwungenem Gewitter, kein Crashlog. Dort erschienen vier Wetter-Slider
+(„Thunder (weather, Effekte)" 15, „Rain (weather, Ambiente)" 2, „Rain
+(weather, Effekte)" 5, „Thunder (weather, Ambiente)" 2), ein Wind-Sound blieb
+als einzelner Rest auf seinem Vanilla-Regler, und alle 5363 Sound-Deskriptoren
+bekamen einen Namen. Danach wurden DLL, INI, `SkyrimPrefs.ini` und die
+Engine-Fixes-Datei der Hauptliste aus der Sicherung wiederhergestellt.
 
 **Wetter-Slider nach `6614ab7`.** Ein einzelner übrig gebliebener Deskriptor
 bekommt keinen eigenen Slider mehr, wenn eine Mod den Typ abdeckt; er wird
