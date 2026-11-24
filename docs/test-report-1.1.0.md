@@ -20,9 +20,9 @@ Lab-Session, die den Branch zum ersten Mal gebaut und gestartet hat.
 - **Gehört wurde nichts.** Alle Aussagen stützen sich auf Logs und Dateien.
 - **Builds:** Die Läufe „frische INI", „INI aus 1.0.2", „Engine Fixes",
   „schreibgeschützt", „Vanilla-Master" und die Wetterläufe außer Azurite und
-  True Storms liefen mit `b629138` (Stand des PR vor den Fixes). Azurite, True
+  True Storms liefen mit `030b766` (Stand des PR vor den Fixes). Azurite, True
   Storms, Reset All und die Reglerzüge liefen mit dem Migrations-Fix, der
-  letzte Lauf zum Wurzel-Regler mit beiden Fixes (`4457991`).
+  letzte Lauf zum Wurzel-Regler mit beiden Fixes (`27ecf4e`).
 - Die Log-Zeilen unten sind wörtlich, ohne Zeitstempel; wo `'...\`
   steht, ist nur der Pfad der Testinstanz gekürzt. In Abschnitt 4 sind die
   Slider aus den Zeilen `Mod category '...'` zusammengefasst.
@@ -30,16 +30,16 @@ Lab-Session, die den Branch zum ersten Mal gebaut und gestartet hat.
 „Bestanden" heißt: Das Log und die Dateien zeigen das beabsichtigte
 Verhalten. Es heißt nicht, dass es sich richtig anhört.
 
-## 0. Gesamttest mit dem Stand `9a492dc` (zweiter Durchlauf, 2026-11-24)
+## 0. Gesamttest mit dem Stand `aac0e0d` (zweiter Durchlauf, 2026-11-24)
 
-Nach den Abschnitten 1 bis 5 kamen drei Commits dazu (`4457991` Fixes für
-Wurzel-Regler, `9ddfd28` Wetter-Nacharbeit aus der Cloud-Session, `9a492dc`
+Nach den Abschnitten 1 bis 5 kamen drei Commits dazu (`27ecf4e` Fixes für
+Wurzel-Regler, `6614ab7` Wetter-Nacharbeit aus der Cloud-Session, `aac0e0d`
 Seite „Now Playing"). Deshalb lief alles noch einmal mit einem Build dieses
 Stands: 25 Spielstarts, **kein Crashlog, keine geänderten Saves**. Die
 Abschnitte 1 bis 5 bleiben als Protokoll des ersten Durchlaufs stehen; wo der
 zweite abweicht, gilt dieser Abschnitt. Gehört wurde weiterhin nichts.
 
-Build: wieder ohne Fehler und Warnungen, auch `9ddfd28`, das vorher nie
+Build: wieder ohne Fehler und Warnungen, auch `6614ab7`, das vorher nie
 kompiliert worden war.
 
 | Test | Laufzeit | Status | Beleg oder Begründung |
@@ -62,7 +62,7 @@ kompiliert worden war.
 | Wetter, zehn Load Orders | 1.6.1170 | bestanden | Tabelle unten; erzwungene Wetterwechsel ohne Absturz |
 | Änderung im echten Vanilla-Menü; SkyParkour; echte 1.0.2-INI; Nebenwirkungen des Umhängens | | nicht gelaufen | wie im ersten Durchlauf |
 
-**Wetter-Slider nach `9ddfd28`.** Ein einzelner übrig gebliebener Deskriptor
+**Wetter-Slider nach `6614ab7`.** Ein einzelner übrig gebliebener Deskriptor
 bekommt keinen eigenen Slider mehr, wenn eine Mod den Typ abdeckt; er wird
 geloggt (`Weather sound 0010C442 (defined in 'Skyrim.esm') stays on its
 Vanilla slider: the only one a mod's Thunder slider does not cover`). Jeder
@@ -119,7 +119,7 @@ Neu aufgefallen im zweiten Durchlauf:
 Build wurde nichts geändert. Die DLL lädt auf 1.6.1170 und 1.7.104.
 
 Geändert wurde später wegen zweier Laufzeitbefunde, nicht wegen des Builds
-(Commit `4457991`, `src/AudioSliders.cpp`): siehe Test „globaler Regler mit
+(Commit `27ecf4e`, `src/AudioSliders.cpp`): siehe Test „globaler Regler mit
 Wurzel-Kategorie" und „Änderung im Vanilla-Menü".
 
 ## 2. Ergebnis pro Test
@@ -221,7 +221,7 @@ Zweiter Start, INI weiter schreibgeschützt:
 
 **Globaler Regler mit Wurzel-Kategorie (Word Walls).**
 
-Fehlgeschlagen mit `b629138` (1.6.1170; INI ohne Marker, Store 0.8, Global
+Fehlgeschlagen mit `030b766` (1.6.1170; INI ohne Marker, Store 0.8, Global
 0.5, vom Spiel gespeichertes `fVal4` 0.4):
 
 ```
@@ -403,7 +403,7 @@ Extra-Regler).
 
 **Abstürze:** keine, in keinem Lauf ein Crashlog.
 
-**Fehler im Code, behoben in `4457991`:**
+**Fehler im Code, behoben in `27ecf4e`:**
 
 - Migration skalierte die Basis einer Wurzel-Kategorie doppelt, wenn der
   Globalregler aktiv war (Beleg oben).
