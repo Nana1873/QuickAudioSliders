@@ -30,6 +30,88 @@ Lab-Session, die den Branch zum ersten Mal gebaut und gestartet hat.
 „Bestanden" heißt: Das Log und die Dateien zeigen das beabsichtigte
 Verhalten. Es heißt nicht, dass es sich richtig anhört.
 
+## 0. Gesamttest mit dem Stand `9a492dc` (zweiter Durchlauf, 2026-11-24)
+
+Nach den Abschnitten 1 bis 5 kamen drei Commits dazu (`4457991` Fixes für
+Wurzel-Regler, `9ddfd28` Wetter-Nacharbeit aus der Cloud-Session, `9a492dc`
+Seite „Now Playing"). Deshalb lief alles noch einmal mit einem Build dieses
+Stands: 25 Spielstarts, **kein Crashlog, keine geänderten Saves**. Die
+Abschnitte 1 bis 5 bleiben als Protokoll des ersten Durchlaufs stehen; wo der
+zweite abweicht, gilt dieser Abschnitt. Gehört wurde weiterhin nichts.
+
+Build: wieder ohne Fehler und Warnungen, auch `9ddfd28`, das vorher nie
+kompiliert worden war.
+
+| Test | Laufzeit | Status | Beleg oder Begründung |
+|---|---|---|---|
+| Frische INI | 1.7.104 | bestanden | `Created '...QuickAudioSliders.ini' (wrote the self-documenting template)`, `0 of 0 stored volume(s) differed` |
+| INI aus 1.0.2 (nachgebaut), ohne und mit Änderung | 1.7.104 | bestanden | `stored 0.3300 predates SkyrimPrefs.ini, taking over the current 0.8000 (stored)`, `1 of 4 stored volume(s) differed` |
+| Engine Fixes, veraltete SNCT-Datei | 1.7.104 | bestanden | `Restored 000172A1  'Effekte' (slot 0) ... volume 0.6000 (was 0.2000)`; zweiter Start `0 of 4 ... differed` |
+| Ohne Engine Fixes | 1.6.1170 | bestanden | alle Läufe der Testinstanz |
+| QAS-INI schreibgeschützt | 1.7.104 | bestanden | `write failed, Windows error 5`, Ersatzdatei mit zwei Zeilen, zweiter Start `fallback '...' with 2 line(s)` |
+| Vanilla-Master 50 % über Neustart | 1.7.104 | bestanden | `Vanilla master restored to 0.5000 from the volume store`; zweiter Start `fAudioMasterVolume:AudioMenu = 0.5000` |
+| Globaler Regler mit Word Walls, Store 0.8 / Global 0.5, zwei Starts | 1.6.1170 | bestanden | beide Starts `Restored ... volume 0.8000`, danach `Restored global multiplier 0.5000`; `fVal4=0.4000` |
+| Migration mit skaliertem Wurzel-Regler | 1.6.1170 | bestanden | `fVal4` 0.4: `volume 0.8000 (was 0.4000)`; `fVal4` 0.3: `taking over the current 0.6000 (found 0.3000 with the global multiplier 0.5000)` |
+| Regler per Maus gezogen | beide | bestanden | 1.6.1170: Effekte 0.5, Word Walls 0.81, Global 0.51; 1.7.104 mit Engine Fixes: Word Walls 0.8, Global 0.5, jeweils `Persisted ... (ok)` |
+| Verpasstes Loslassen | 1.6.1170 | bestanden | beim Schließen des Mod-Menüs keine Zeile; beim nächsten Menü `Storing 'Musik' now: it was moved but never released` |
+| Änderung von außen, Journal schließen (Papyrus statt Vanilla-Regler) | beide | bestanden | 1.6.1170: `Adopted 000876BD 'Stimmen' ...: 1.0000 -> 0.3700` und Wurzel-Regler `0.8100 -> 0.5882` (0.3 / 0.51); 1.7.104 mit Engine Fixes: `0.8000 -> 0.6000`. Durchläufe ohne Änderung: keine Zeile |
+| Neustart nach Übernahme, mit Engine Fixes | 1.7.104 | bestanden | Engine Fixes hatte noch 0.8 gespeichert: `Restored FE10D8A1  'Voiced Word Walls' ... volume 0.6000 (was 0.8000)` |
+| Reset All und Neustart danach | 1.6.1170 | bestanden | `Reset all 8 slider(s) ...`; Neustart `8 slider(s) have a stored volume`, `0 of 8 stored volume(s) differed` |
+| „Now Playing" | beide | bestanden | Hook installiert (`... DoResolve hooked`, 3297 bis 3395 Deskriptoren), Seite füllt sich, Regler-Spalte zeigt „Effekte", „Fußstapfen", „Thunder (weather)". Namen überall nur als `Plugin|FormID`, siehe unten |
+| „Now Playing" abgeschaltet (`[NowPlaying] Enabled=0`) | 1.6.1170 | bestanden | `pages: Volume, Extra Sliders`, keine Zeile `Now Playing:` |
+| Wetter, zehn Load Orders | 1.6.1170 | bestanden | Tabelle unten; erzwungene Wetterwechsel ohne Absturz |
+| Änderung im echten Vanilla-Menü; SkyParkour; echte 1.0.2-INI; Nebenwirkungen des Umhängens | | nicht gelaufen | wie im ersten Durchlauf |
+
+**Wetter-Slider nach `9ddfd28`.** Ein einzelner übrig gebliebener Deskriptor
+bekommt keinen eigenen Slider mehr, wenn eine Mod den Typ abdeckt; er wird
+geloggt (`Weather sound 0010C442 (defined in 'Skyrim.esm') stays on its
+Vanilla slider: the only one a mod's Thunder slider does not cover`). Jeder
+Slider loggt jetzt seine Sounds, und „AMB" heißt „Ambience".
+
+| Load Order | Slider (Deskriptoren, Elternkategorie) | Nicht umgehängter Rest |
+|---|---|---|
+| Nur Vanilla-Wetter | „Thunder (weather)" (3, Effekte); „Rain (weather)" (2, Ambience); „Wind (weather)" (1, Ambience (region)) | keiner |
+| NAT | keiner | Donner `0010C442` |
+| NAT + VSfW, ohne und mit Patch | keiner | Donner `0010C442` |
+| True Storms, ohne und mit VSfW | keiner | Donner `0010C442` |
+| Cathedral + Unofficial Update + VSfW mit Patch | keiner | Donner `0010C442` |
+| Cathedral + Unofficial Update + VSfW ohne Patch | „Thunder (weather, other)" (4, Effekte) | Wind `0F00080A` (Cathedral Weathers.esp) |
+| Cathedral + Unofficial Update | „Wind (weather, Ambience)" (2); „Thunder (weather, other)" (4, Effekte); „Wind (weather, Ambience (region))" (1) | keiner |
+| Azurite Weathers III + Azure | „Wind (weather, Ambience)" (1); „Thunder (weather)" (14, Effekte); „Rain (weather)" (5, Effekte); „Wind (weather, Ambience (region))" (1) | keiner |
+| 1.7.104-Liste mit Azurite III (nur Planung) | „Thunder (weather)" (17, Effekte); „Wind (weather, Ambience)" (1); „Rain (weather, Effekte)" (5); „Rain (weather, Ambience)" (1); „Wind (weather, Ambience (region))" (1) | keiner |
+
+`Weather sounds:` in dieser Reihenfolge (NAT-, True-Storms- und die
+Cathedral-Zeilen je einmal pro unterschiedlichem Ergebnis):
+
+```
+Weather sounds: 8 descriptor(s) listed by 110 weather(s) as precipitation / thunder / wind: 0 on a mod's own category, 2 engine-managed, 0 excluded or without category, 0 single left-over(s) left alone, 6 get 3 weather slider(s)
+Weather sounds: 33 descriptor(s) listed by 133 weather(s) as precipitation / thunder / wind: 30 on a mod's own category, 2 engine-managed, 0 excluded or without category, 1 single left-over(s) left alone, 0 get 0 weather slider(s)
+Weather sounds: 54 descriptor(s) listed by 122 weather(s) as precipitation / thunder / wind: 51 on a mod's own category, 2 engine-managed, 0 excluded or without category, 1 single left-over(s) left alone, 0 get 0 weather slider(s)
+Weather sounds: 39 descriptor(s) listed by 119 weather(s) as precipitation / thunder / wind: 36 on a mod's own category, 2 engine-managed, 0 excluded or without category, 1 single left-over(s) left alone, 0 get 0 weather slider(s)
+Weather sounds: 39 descriptor(s) listed by 119 weather(s) as precipitation / thunder / wind: 30 on a mod's own category, 4 engine-managed, 0 excluded or without category, 1 single left-over(s) left alone, 4 get 1 weather slider(s)
+Weather sounds: 39 descriptor(s) listed by 119 weather(s) as precipitation / thunder / wind: 28 on a mod's own category, 4 engine-managed, 0 excluded or without category, 0 single left-over(s) left alone, 7 get 3 weather slider(s)
+Weather sounds: 23 descriptor(s) listed by 110 weather(s) as precipitation / thunder / wind: 0 on a mod's own category, 2 engine-managed, 0 excluded or without category, 0 single left-over(s) left alone, 21 get 4 weather slider(s)
+Weather sounds: 27 descriptor(s) listed by 214 weather(s) as precipitation / thunder / wind: 0 on a mod's own category, 2 engine-managed, 0 excluded or without category, 0 single left-over(s) left alone, 25 get 5 weather slider(s)
+```
+
+Neu aufgefallen im zweiten Durchlauf:
+
+- **„Now Playing" zeigt keine Sound-Namen**, auch nicht in der 1.7.104-Liste
+  mit Native EditorID Fix: `GetFormEditorID()` liefert für Sound-Deskriptoren
+  dort nichts, also steht überall `Skyrim.esm|03F8CE`. Die Spalten Mod und
+  Regler stimmen, aber ohne Namen ist die Seite nur halb so nützlich.
+- Derselbe Vanilla-Deskriptor `0003D09F` zählt mit Vanilla-Wetter als Regen
+  („Rain (weather)") und mit Cathedral als Wind („Wind (weather, Ambience)"),
+  weil die Wetter-Records ihn unterschiedlich einstufen.
+- Bleibt aus dem ersten Durchlauf: uneinheitliche Zusätze in den Namen
+  („other" gegen Elternkategorie), zwei Regen-Slider in der 1.7.104-Liste,
+  kein Slider „Snow" in irgendeiner Load Order.
+- Engine Fixes speichert den Wert einer Wurzel-Kategorie nicht bei jeder
+  Änderung; nach der Übernahme stand in seiner Datei noch der alte Wert. Der
+  Store hat das beim Neustart korrigiert.
+- Das Mod-Menü merkt sich seine Fensterposition; ein versehentlich
+  verschobenes Fenster blieb über Neustarts verschoben (Framework, nicht QAS).
+
 ## 1. Build
 
 `tools/build.ps1` (Preset `release`, MSVC, CommonLibSSE-NG `12d61f3`): 528 von
@@ -241,8 +323,9 @@ Beim nächsten Menü-Ereignis im Spiel:
 
 ### Nachtrag: Seite „Now Playing"
 
-Nach diesem Bericht dazugekommen und **nicht Teil der Tabelle oben**. Bisher
-nur ein Kurztest auf 1.6.1170 (nur Vanilla-Plugins, erzwungenes Gewitter):
+Nach dem ersten Durchlauf dazugekommen und **nicht Teil der Tabelle oben**;
+das Ergebnis des Gesamttests steht in Abschnitt 0. Der erste Kurztest auf
+1.6.1170 (nur Vanilla-Plugins, erzwungenes Gewitter):
 
 ```
 [info] Registered SKSE Menu Framework section 'Quick Audio Sliders' (framework v3.8), pages: Volume, Extra Sliders, Now Playing

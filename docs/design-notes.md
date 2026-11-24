@@ -762,9 +762,16 @@ finds the slider by walking the category's parents (`Audio::SliderFor`).
   was not checked).
 - Names are editor IDs only with an editor-ID restoring plugin; otherwise
   `<plugin>|<local FormID>`.
-- First hook into game code in this plugin. Smoke-tested on 1.6.1170 only
-  (forced thunderstorm, list filled, slider column showed "Effekte" and
-  "Thunder (weather)", no crash). Not run on 1.7.104, not measured for cost.
+- First hook into game code in this plugin. Run on 1.6.1170 and on 1.7.104
+  in a large load order (2026-11-24): the list fills, the slider column
+  shows "Effekte", "Fußstapfen", "Thunder (weather)", no crash in 25 game
+  starts with the hook installed; `Enabled=0` registers no page and no hook.
+  Not measured for cost.
+- Open: no sound names in practice. `GetFormEditorID()` returned nothing for
+  sound descriptors on 1.7.104 even with Native EditorID Fix installed, so
+  every row reads `<plugin>|<FormID>`. `BGSSoundDescriptorForm` has its own
+  `SetFormEditorID` (@ 140324160 on 1.6.1170); where it keeps the ID was not
+  looked up.
 
 ## After the lab report (2026-11-24, `docs/test-report-1.1.0.md`)
 
