@@ -740,3 +740,33 @@ no direct caller). A view would have to read `stateMap` under the read lock
 (no category in `BSSoundInfo` as far as the headers show) or hook the audio
 thread.
 
+## After the lab report (2026-11-24, `docs/test-report-1.1.0.md`)
+
+Changed in reaction to the report, again without a build (written in the
+cloud session; rebuild before release):
+
+- A weather plan with a single descriptor is dropped when a mod already has a
+  slider for that type: NAT, True Storms and VSfW each left exactly one
+  thunder descriptor behind, which gave a "Thunder (weather, other)" slider
+  in every load order. The sound stays on its Vanilla slider and is logged.
+- Every weather slider logs its sounds with FormID, defining plugin and last
+  overriding plugin (`SourceFilesText`), so a report can be judged from the
+  log.
+- `ParentLabel` names `AudioCategoryAMB` (07F80B) "Ambience" instead of the
+  raw "AMB".
+
+Left as is, known from the report:
+
+- Two sliders for one type when its sounds hang on two Vanilla parents (rain
+  on Ambience and on Effects with Azurite): one runtime category has one
+  parent, and moving a sound to another parent would change its ducking.
+- A slider dragged while the mod menu closes is stored at the next game menu
+  event, not at once.
+- A root menu category with an engine slot is restored and mirrored on every
+  start while the global multiplier is active (the game saves the scaled
+  value on exit); the Vanilla menu shows the scaled value for it.
+- With a read-only plugin INI, "Cannot write" appears on every start (the
+  template wants to add a key).
+- Not run at all: a real slider in Settings > Audio, SkyParkour, a real
+  long-used 1.0.2 INI, and everything that needs ears.
+

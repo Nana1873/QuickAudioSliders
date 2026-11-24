@@ -1181,6 +1181,8 @@ namespace
             }
         }
         switch (a_parent.GetFormID() & 0x00FFFFFF) {
+        case 0x07F80B:
+            return "Ambience";  // AudioCategoryAMB has no FULL; the raw name read as "AMB"
         case 0x071E63:
             return "Ambience (region)";
         case 0x0EA51F:
@@ -1415,6 +1417,22 @@ namespace
     // work has finished.
     constexpr auto kWeatherOwner = "Weather"sv;  // pseudo plugin name: group heading of the weather sliders
 
+    // "defined in 'A.esp'" or "defined in 'A.esp', last changed by 'B.esp'":
+    // the plugins a record comes from, for log lines about single sounds
+    // (editor IDs are not kept at runtime).
+    std::string SourceFilesText(const RE::TESForm& a_form)
+    {
+        const auto* files = a_form.sourceFiles.array;
+        if (!files || files->empty() || !files->front()) {
+            return "no source file";
+        }
+        auto text = std::format("defined in '{}'", files->front()->GetFilename());
+        if (files->size() > 1 && files->back() && files->back() != files->front()) {
+            text += std::format(", last changed by '{}'", files->back()->GetFilename());
+        }
+        return text;
+    }
+
     // Automatic weather sliders. Every WTHR lists its sounds with a type
     // (precipitation / wind / thunder). A listed sound that still hangs on a
     // Vanilla-defined category (Ambience, ...) has no slider of its own: it
@@ -1487,9 +1505,9 @@ namespace
         const auto excludes = ReadExcludeList();
         std::array<bool, kKinds> coveredByMod{};
         std::size_t              onModCategory = 0, engineManaged = 0, skipped = 0, moved = 0;
-        std::vector<ModCategoryPlan>                 plans;
-        std::vector<Kind>                            planKinds;
-        std::vector<const RE::BGSSoundDescriptor*>   claimed;
+        std::vector<ModCategoryPlan>                          plans;
+        std::vector<Kind>                                     planKinds;
+        std::vector<std::vector<RE::BGSSoundDescriptorForm*>> planForms;  // for the log
         for (auto& [descriptor, usage] : usages) {
             const auto kind = static_cast<Kind>(
                 std::distance(usage.votes.begin(), std::max_element(usage.votes.begin(), usage.votes.end())));
@@ -1532,10 +1550,33 @@ namespace
                 plan.persistKey = std::format("weather:{}|{:08X}", kNames[kind], category->GetLocalFormID());
                 plans.push_back(std::move(plan));
                 planKinds.push_back(kind);
+                planForms.emplace_back();
             }
             plans[planIndex].descriptors.push_back(descriptor);
-            claimed.push_back(descriptor);
-            ++moved;
+            planForms[planIndex].push_back(usage.form);
+        }
+
+        // Where a mod already has a slider for the type, a single left-over
+        // sound is not worth a second one (lab, 2026-11-24: every weather mod
+        // left exactly one thunder descriptor behind): it stays where it is.
+        std::size_t leftAlone = 0;
+        for (std::size_t index = plans.size(); index-- > 0;) {
+            if (coveredByMod[planKinds[index]] && plans[index].descriptors.size() < 2) {
+                for (const auto* form : planForms[index]) {
+                    logs::info("Weather sound {:08X} ({}) stays on its Vanilla slider: the only one a mod's {} slider "
+                               "does not cover",
+                        form->GetFormID(), SourceFilesText(*form), kNames[planKinds[index]]);
+                }
+                leftAlone += plans[index].descriptors.size();
+                plans.erase(plans.begin() + static_cast<std::ptrdiff_t>(index));
+                planKinds.erase(planKinds.begin() + static_cast<std::ptrdiff_t>(index));
+                planForms.erase(planForms.begin() + static_cast<std::ptrdiff_t>(index));
+            }
+        }
+        std::vector<const RE::BGSSoundDescriptor*> claimed;
+        for (const auto& plan : plans) {
+            claimed.insert(claimed.end(), plan.descriptors.begin(), plan.descriptors.end());
+            moved += plan.descriptors.size();
         }
 
         // A weather sound of a mod without own slider was planned into that
@@ -1557,12 +1598,16 @@ namespace
                 }
             }
             plans[index].label = std::format("{} ({})", kNames[kind], detail);
+            for (const auto* form : planForms[index]) {
+                logs::info("Weather slider '{}': sound {:08X} ({})", plans[index].label, form->GetFormID(),
+                    SourceFilesText(*form));
+            }
             g_modPlans.push_back(std::move(plans[index]));
         }
         logs::info("Weather sounds: {} descriptor(s) listed by {} weather(s) as precipitation / thunder / wind: "
                    "{} on a mod's own category, {} engine-managed, {} excluded or without category, "
-                   "{} get {} weather slider(s)",
-            usages.size(), weathers, onModCategory, engineManaged, skipped, moved, plans.size());
+                   "{} single left-over(s) left alone, {} get {} weather slider(s)",
+            usages.size(), weathers, onModCategory, engineManaged, skipped, leftAlone, moved, plans.size());
     }
 
     void CreateModCategories()
