@@ -662,9 +662,16 @@ Changes:
 - A slider that was moved but never reported "deactivated after edit" is
   persisted on the next frame it is inactive, or when any menu closes
   (`Entry::dirty`, `FlushDirty`).
-- Support: the previous log is kept as `QuickAudioSliders.prev.log`; startup
-  logs the store paths with their line counts; the 150-odd "no stored volume"
-  lines became one summary line.
+- Support: the previous log is kept as `QuickAudioSliders.prev.log` (one old
+  file only, by the user's decision: no pile of logs on users' disks);
+  startup logs the store paths with their line counts; the 150-odd "no stored
+  volume" lines became one summary line. Added 2026-11-25: the first line
+  carries the date (the other lines only the time), and startup says whether
+  Engine Fixes is loaded and how many values its `EngineFixes_SNCT.ini`
+  holds (`Engine Fixes: loaded; EngineFixes_SNCT.ini with 4 value(s)`), so a
+  "was X" in a `Restored` line can be traced to it. What to ask a user for:
+  both logs, the plugin INI (and the fallback under My Games/SKSE if it
+  exists), `[AudioMenu]` of SkyrimPrefs.ini and `EngineFixes_SNCT.ini`.
 
 Test list for the lab: fresh INI; INI from 1.0.2 with and without changes made
 in the Vanilla menu since; change in the Vanilla menu then restart; with and

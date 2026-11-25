@@ -16,7 +16,8 @@ namespace
         const auto* plugin = SKSE::PluginDeclaration::GetSingleton();
         // Keep the previous session's log: a "my sliders reverted" report
         // needs the session that changed them, and the log is truncated on
-        // every start.
+        // every start. One old file only, on purpose: no pile of logs on
+        // users' disks.
         {
             std::error_code ec;
             const auto      previous = *path / std::format("{}.prev.log", plugin->GetName());
@@ -59,10 +60,14 @@ SKSEPluginLoad(const SKSE::LoadInterface* a_skse)
     SKSE::Init(a_skse, false);
 
     const auto* plugin = SKSE::PluginDeclaration::GetSingleton();
-    logs::info("{} v{} loaded (runtime {})",
+    // The log lines carry the time only; the date tells which session a
+    // log (or the kept previous one) belongs to.
+    SYSTEMTIME now{};
+    GetLocalTime(&now);
+    logs::info("{} v{} loaded (runtime {}) on {:04}-{:02}-{:02}",
         plugin->GetName(),
         plugin->GetVersion().string(),
-        REL::Module::get().version().string());
+        REL::Module::get().version().string(), now.wYear, now.wMonth, now.wDay);
 
     if (a_skse->IsEditor()) {
         logs::info("Creation Kit detected; plugin disabled");

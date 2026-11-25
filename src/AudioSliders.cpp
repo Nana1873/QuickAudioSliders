@@ -1898,6 +1898,25 @@ namespace QAS::Audio
         logs::info("Volume store: '{}' with {} [Volumes] line(s); fallback '{}' {}", g_pluginIniPath,
             CountStoreValues(g_pluginIniPath), g_fallbackIniPath,
             g_fallbackActive ? std::format("with {} line(s)", CountStoreValues(g_fallbackIniPath)) : "not in use"s);
+        // For support: Engine Fixes restores sound category volumes from its
+        // own file at kDataLoaded, before the store is applied. Whether it is
+        // there explains a "was X" in the "Restored" lines below.
+        {
+            const bool      loaded = GetModuleHandleW(L"EngineFixes.dll") != nullptr ||
+                                     GetModuleHandleW(L"EngineFixesVR.dll") != nullptr;
+            std::error_code ec;
+            const auto      snct = std::filesystem::absolute("Data/SKSE/Plugins/EngineFixes_SNCT.ini", ec);
+            std::string     file = "no EngineFixes_SNCT.ini";
+            if (!ec && std::filesystem::exists(snct, ec)) {
+                std::ifstream in(snct);
+                std::size_t   values = 0;
+                for (std::string line; std::getline(in, line);) {
+                    values += line.find('=') != std::string::npos ? 1 : 0;
+                }
+                file = std::format("EngineFixes_SNCT.ini with {} value(s)", values);
+            }
+            logs::info("Engine Fixes: {}; {}", loaded ? "loaded" : "not loaded", file);
+        }
         const bool modCategoriesEnabled = ReadIniInt(kModCategoriesSection, QAS::Ini::kModCategoriesEnabledKey,
                                               QAS::Ini::kModCategoriesEnabledDefault ? 1 : 0) != 0;
         const int  modCategoriesMinSounds = ReadIniInt(kModCategoriesSection, "MinSounds", 3);
