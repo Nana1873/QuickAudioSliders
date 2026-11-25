@@ -22,13 +22,25 @@ namespace
     constexpr auto kSrdFolderRelative = "Data/SKSE/Plugins/SoundRecordDistributor";
     constexpr auto kGlobalKey = "GlobalMultiplier";    // [Volumes] key of the "Alle Sounds" slider
     constexpr auto kMasterRepairedKey = "MasterRepaired";  // [Volumes] marker: startup master repair done once
+    constexpr auto kOwnsAllKey = "StoreOwnsAllVolumes";  // [Volumes] marker: the store also restores engine-slot categories
+    constexpr auto kVanillaMasterKey = "VanillaMaster";  // [Volumes] copy of fAudioMasterVolume
     constexpr int  kEngineSlotsFallback = 8;  // assumed when no uID<n> setting is registered
+    constexpr float kVolumeEpsilon = 0.0005F;  // two volumes closer than this are the same value
 
     std::vector<std::unique_ptr<QAS::Audio::Entry>> g_entries;
     std::vector<QAS::Audio::Group>                  g_groups;
     std::atomic<bool>                               g_ready{ false };
     std::string                                     g_prefsPath;
     std::string                                     g_pluginIniPath;
+    // Second home of the volume store, used when the plugin INI cannot be
+    // written (see "volume store" below): <My Games>/SKSE/QuickAudioSliders.ini.
+    std::string                                     g_fallbackIniPath;
+    std::string                                     g_storeIdentity;    // real path of the plugin INI, lower case
+    std::string                                     g_fallbackSection;  // this installation's section in the fallback file
+    constexpr auto                                  kFallbackOwnerKey = "PluginIni";  // fallback section: path it stands in for
+    bool                                            g_fallbackActive{ false };  // the fallback file holds values
+    bool                                            g_fallbackWarned{ false };
+    float                                           g_savedMaster{ -1.0F };  // Vanilla master as last stored / found; < 0 = unknown
     int                                             g_engineSlots{ kEngineSlotsFallback };
 
     float Clamp01(float a_value);
@@ -53,6 +65,7 @@ namespace
     std::vector<RootCategory> g_roots;
     std::atomic<float>        g_global{ 1.0F };
     std::atomic<bool>         g_globalActive{ false };
+    std::atomic<bool>         g_globalDirty{ false };  // SetGlobal() without PersistGlobal() yet
 
     constexpr float kGlobalIdentity = 0.9995F;  // >= this counts as 100%
 
@@ -620,6 +633,18 @@ namespace
             "; Exclude: comma-separated, case-insensitive plugin-name substrings that\n"
             "; never get a runtime category. Example: Exclude=EVE,Taberu\n"
             "Exclude="sv },
+        { "Weather"sv,
+            "; Weather: 1 = automatic Rain / Snow / Thunder / Wind sliders for the\n"
+            "; weather sounds that no mod slider covers, i.e. those still running through\n"
+            "; Vanilla categories such as Ambience (default), 0 = off.\n"
+            "Weather=1"sv },
+    };
+
+    constexpr IniTemplateKey kNowPlayingKeys[] = {
+        { "Enabled"sv,
+            "; Enabled: 1 = show the page and keep a short list of the requested sounds\n"
+            "; (default), 0 = no page and no hook. Takes effect on the next game start.\n"
+            "Enabled=1"sv },
     };
 
     constexpr IniTemplateSection kIniTemplate[] = {
@@ -632,6 +657,12 @@ namespace
             "; skipped. Sound categories a mod defines but hides from the menu (or a\n"
             "; patch hides) still get an Extra slider when sounds use them."sv,
             kModCategoriesKeys, std::size(kModCategoriesKeys) },
+        { "NowPlaying"sv,
+            "[NowPlaying]\n"
+            "; Page \"Now Playing\": lists the sounds the game requested in the last two\n"
+            "; minutes and the slider that controls each. Sounds started by file name\n"
+            "; (voice lines, most music) are not listed."sv,
+            kNowPlayingKeys, std::size(kNowPlayingKeys) },
         { "Labels"sv,
             "[Labels]\n"
             "; Optional display-name overrides for sliders, shown verbatim.\n"
@@ -641,10 +672,11 @@ namespace
             nullptr, 0 },
         { "Volumes"sv,
             "[Volumes]\n"
-            "; Persistence store written by the plugin on slider release: volumes of\n"
-            "; categories without an engine [AudioMenu] slot, GlobalMultiplier, runtime\n"
-            "; mod categories (mod:<plugin>|<parent FormID>) and the MasterRepaired\n"
-            "; marker. Managed by the plugin - do not edit manually."sv,
+            "; Persistence store written by the plugin: the volume of every slider\n"
+            "; (<plugin>|<local FormID>, runtime mod categories as\n"
+            "; mod:<plugin>|<parent FormID>), GlobalMultiplier, VanillaMaster and\n"
+            "; internal markers. Applied on every game start. Managed by the plugin -\n"
+            "; do not edit manually."sv,
             nullptr, 0 },
     };
 
@@ -884,42 +916,176 @@ namespace
         }
     }
 
-    std::optional<float> ReadPluginVolume(const std::string& a_key)
+    // ---- volume store ----
+    //
+    // [Volumes] of the plugin INI is the source of truth for every slider,
+    // the global multiplier and the Vanilla master: values are written on
+    // every change and applied at kDataLoaded, after the engine and other
+    // plugins restored theirs. Every write is read back. A plugin INI that
+    // does not take the value (read-only file, a mod manager's virtual file
+    // system, antivirus) is replaced by the fallback file next to the SKSE
+    // logs, key by key: a key present in the fallback is newer than the same
+    // key in the plugin INI, and is removed from the fallback as soon as the
+    // plugin INI accepts a write for it again.
+    //
+    // The fallback file exists once per Windows user, the plugin INI once per
+    // installation (game folder, mod manager instance). So the fallback keeps
+    // one section per installation, "Volumes.<hash of the plugin INI's real
+    // path>": another modlist's fallback values are never read or replaced.
+
+    // The file behind the plugin INI as the file system knows it (under MO2
+    // the file in overwrite/ or a mod folder, where the API reports it),
+    // lower case. Falls back to the path the game sees.
+    std::string ResolveStoreIdentity()
     {
-        if (g_pluginIniPath.empty() || a_key.empty()) {
-            return std::nullopt;
+        std::string identity = g_pluginIniPath;
+        const HANDLE file = CreateFileA(g_pluginIniPath.c_str(), 0, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+            nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+        if (file != INVALID_HANDLE_VALUE) {
+            char       buffer[1024]{};
+            const auto length = GetFinalPathNameByHandleA(file, buffer, sizeof(buffer), FILE_NAME_NORMALIZED);
+            CloseHandle(file);
+            if (length > 0 && length < sizeof(buffer)) {
+                identity = buffer;
+                if (identity.starts_with(R"(\\?\)")) {
+                    identity.erase(0, 4);
+                }
+            }
+        }
+        if (!identity.empty()) {
+            CharLowerBuffA(identity.data(), static_cast<unsigned long>(identity.size()));
+        }
+        return identity;
+    }
+
+    std::string FallbackSectionFor(const std::string& a_identity)
+    {
+        std::uint32_t hash = 2166136261U;  // FNV-1a
+        for (const unsigned char c : a_identity) {
+            hash = (hash ^ c) * 16777619U;
+        }
+        return std::format("{}.{:08X}", kVolumesSection, hash);
+    }
+
+    const char* StoreSection(const std::string& a_path)
+    {
+        return !g_fallbackSection.empty() && a_path == g_fallbackIniPath ? g_fallbackSection.c_str() : kVolumesSection;
+    }
+
+    std::string ReadStoreString(const std::string& a_path, const std::string& a_key)
+    {
+        if (a_path.empty() || a_key.empty()) {
+            return {};
         }
         char buffer[32]{};
-        GetPrivateProfileStringA(kVolumesSection, a_key.c_str(), "", buffer, sizeof(buffer), g_pluginIniPath.c_str());
-        if (buffer[0] == '\0') {
+        GetPrivateProfileStringA(StoreSection(a_path), a_key.c_str(), "", buffer, sizeof(buffer), a_path.c_str());
+        return buffer;
+    }
+
+    std::optional<float> ParseStoreVolume(const std::string& a_text, const std::string& a_key, const std::string& a_path)
+    {
+        if (a_text.empty()) {
             return std::nullopt;
         }
         // std::from_chars, not strtof: strtof parses through the C locale,
         // which another plugin in the process may have changed (a "0.9500"
         // read as 0.0 would silently mute everything restored).
         float      value = 0.0F;
-        const auto result = std::from_chars(buffer, buffer + std::string_view{ buffer }.size(), value);
+        const auto result = std::from_chars(a_text.data(), a_text.data() + a_text.size(), value);
         if (result.ec != std::errc{} || !std::isfinite(value)) {
-            logs::warn("[{}] {} = '{}' in '{}' is not a number; ignored", kVolumesSection, a_key, buffer, g_pluginIniPath);
+            logs::warn("[{}] {} = '{}' in '{}' is not a number; ignored", kVolumesSection, a_key, a_text, a_path);
             return std::nullopt;
         }
         return Clamp01(value);
     }
 
-    bool WritePluginVolume(const std::string& a_key, float a_volume)
+    std::optional<float> ReadPluginVolume(const std::string& a_key)
     {
-        if (g_pluginIniPath.empty() || a_key.empty()) {
+        if (g_fallbackActive) {
+            if (const auto value = ParseStoreVolume(ReadStoreString(g_fallbackIniPath, a_key), a_key, g_fallbackIniPath)) {
+                return value;
+            }
+        }
+        return ParseStoreVolume(ReadStoreString(g_pluginIniPath, a_key), a_key, g_pluginIniPath);
+    }
+
+    // Writes one [Volumes] line and reads it back; false when the file did
+    // not take the value.
+    bool WriteStoreString(const std::string& a_path, const std::string& a_key, const std::string& a_text)
+    {
+        if (a_path.empty() || a_key.empty()) {
             return false;
         }
-        std::error_code ec;
-        const auto      path = std::filesystem::path(g_pluginIniPath);
-        if (!std::filesystem::exists(path, ec)) {
-            // First write without a file (deleted since startup): recreate the
-            // commented template so the key lands in a self-documenting file.
-            EnsurePluginIni();
+        const bool          written = WritePrivateProfileStringA(StoreSection(a_path), a_key.c_str(), a_text.c_str(), a_path.c_str()) != 0;
+        const unsigned long error = written ? 0UL : static_cast<unsigned long>(GetLastError());
+        if (written && ReadStoreString(a_path, a_key) == a_text) {
+            return true;
         }
-        return WritePrivateProfileStringA(kVolumesSection, a_key.c_str(), std::format("{:.4f}", a_volume).c_str(),
-                   g_pluginIniPath.c_str()) != 0;
+        logs::warn("[{}] {} = {} was not stored in '{}' ({})", StoreSection(a_path), a_key, a_text, a_path,
+            written ? "the value read back differs" : std::format("write failed, Windows error {}", error));
+        return false;
+    }
+
+    bool WritePluginVolume(const std::string& a_key, float a_volume)
+    {
+        if (a_key.empty()) {
+            return false;
+        }
+        const auto text = std::format("{:.4f}", a_volume);
+        if (!g_pluginIniPath.empty()) {
+            std::error_code ec;
+            if (!std::filesystem::exists(std::filesystem::path(g_pluginIniPath), ec)) {
+                // First write without a file (deleted since startup): recreate the
+                // commented template so the key lands in a self-documenting file.
+                EnsurePluginIni();
+            }
+            if (WriteStoreString(g_pluginIniPath, a_key, text)) {
+                if (g_fallbackActive) {
+                    // The plugin INI holds the newest value again.
+                    WritePrivateProfileStringA(StoreSection(g_fallbackIniPath), a_key.c_str(), nullptr,
+                        g_fallbackIniPath.c_str());
+                }
+                return true;
+            }
+        }
+        if (g_fallbackIniPath.empty()) {
+            return false;
+        }
+        if (!g_fallbackWarned) {
+            g_fallbackWarned = true;
+            logs::warn("The plugin INI '{}' does not accept values; storing them in '{}' [{}] instead", g_pluginIniPath,
+                g_fallbackIniPath, StoreSection(g_fallbackIniPath));
+            // For whoever reads the file: which installation the section is for.
+            WritePrivateProfileStringA(StoreSection(g_fallbackIniPath), kFallbackOwnerKey, g_storeIdentity.c_str(),
+                g_fallbackIniPath.c_str());
+        }
+        if (WriteStoreString(g_fallbackIniPath, a_key, text)) {
+            g_fallbackActive = true;
+            return true;
+        }
+        return false;
+    }
+
+    // Number of "key=value" lines in [Volumes] of a store file, for the
+    // startup log.
+    std::size_t CountStoreValues(const std::string& a_path)
+    {
+        if (a_path.empty()) {
+            return 0;
+        }
+        std::vector<char> buffer(32767, '\0');
+        const auto        length = GetPrivateProfileSectionA(StoreSection(a_path), buffer.data(),
+            static_cast<unsigned long>(buffer.size()), a_path.c_str());
+        std::size_t count = 0;
+        for (std::size_t i = 0; i < length;) {
+            const std::string_view line{ buffer.data() + i };
+            if (line.empty()) {
+                break;
+            }
+            count += line.starts_with(kFallbackOwnerKey) ? 0 : 1;
+            i += line.size() + 1;
+        }
+        return count;
     }
 
     // The engine registers uID0..uID7 as settings and leaves unused slots at
@@ -960,16 +1126,24 @@ namespace
     // leave it at 0 (and so can the Vanilla menu). Restoring it to 100% is
     // part of "reset all", and done once at startup when it is found at 0,
     // so nobody stays in a silent game without a visible reason.
-    void RestoreVanillaMaster(const char* a_reason)
+    void ApplyVanillaMaster(float a_value)
     {
         if (auto* setting = FindPref(kMasterSetting)) {
-            setting->data.f = 1.0F;
+            setting->data.f = a_value;
         }
         if (auto* audio = RE::BSAudioManager::GetSingleton()) {
-            audio->masterVolume = 1.0F;
+            audio->masterVolume = a_value;
         }
         BroadcastVolumeChanged();
-        WriteFloatPref("fAudioMasterVolume", 1.0F);
+        WriteFloatPref("fAudioMasterVolume", a_value);
+    }
+
+    void RestoreVanillaMaster(const char* a_reason)
+    {
+        ApplyVanillaMaster(1.0F);
+        if (WritePluginVolume(kVanillaMasterKey, 1.0F)) {
+            g_savedMaster = 1.0F;
+        }
         logs::info("Vanilla master volume restored to 100% ({})", a_reason);
     }
 
@@ -981,6 +1155,10 @@ namespace
         RE::BGSSoundCategory*                   parent{ nullptr };
         std::vector<RE::BGSSoundDescriptor*>    descriptors;
         RE::BGSSoundCategory*                   created{ nullptr };
+        // Weather plans (PlanWeatherCategories) fix both; empty = derived
+        // from the mod name and the parent.
+        std::string                             label;
+        std::string                             persistKey;
     };
     std::vector<ModCategoryPlan> g_modPlans;
 
@@ -1067,6 +1245,8 @@ namespace
             }
         }
         switch (a_parent.GetFormID() & 0x00FFFFFF) {
+        case 0x07F80B:
+            return "Ambience";  // AudioCategoryAMB has no FULL; the raw name read as "AMB"
         case 0x071E63:
             return "Ambience (region)";
         case 0x0EA51F:
@@ -1242,9 +1422,10 @@ namespace
     // descriptor is re-pointed. Needed: at least one descriptor on the
     // category itself, not engine-managed, plugin not excluded. MinSounds
     // does not apply: it keeps runtime categories from splitting off stray
-    // sounds, but a category the mod made on purpose can carry a single,
-    // important one (Cathedral Weathers Unofficial Update plays its main rain
-    // through the one descriptor left on the hidden "Interior Rain").
+    // sounds, but a category the mod made on purpose can carry a single
+    // descriptor (Cathedral Weathers Unofficial Update leaves exactly one,
+    // an interior-only, conditioned rain loop, on the hidden "Interior
+    // Rain"; it is not the main rain, see docs/design-notes.md).
     void AddUnlistedModCategories(RE::TESDataHandler* a_dataHandler)
     {
         std::unordered_map<RE::BGSSoundCategory*, std::size_t> descriptorCounts;
@@ -1298,6 +1479,201 @@ namespace
     // and the matching slider entries. Descriptors are re-pointed later, one
     // frame after kDataLoaded (see Initialize), so other plugins' kDataLoaded
     // work has finished.
+    constexpr auto kWeatherOwner = "Weather"sv;  // pseudo plugin name: group heading of the weather sliders
+
+    // "defined in 'A.esp'" or "defined in 'A.esp', last changed by 'B.esp'":
+    // the plugins a record comes from, for log lines about single sounds
+    // (editor IDs are not kept at runtime).
+    std::string SourceFilesText(const RE::TESForm& a_form)
+    {
+        const auto* files = a_form.sourceFiles.array;
+        if (!files || files->empty() || !files->front()) {
+            return "no source file";
+        }
+        auto text = std::format("defined in '{}'", files->front()->GetFilename());
+        if (files->size() > 1 && files->back() && files->back() != files->front()) {
+            text += std::format(", last changed by '{}'", files->back()->GetFilename());
+        }
+        return text;
+    }
+
+    // Automatic weather sliders. Every WTHR lists its sounds with a type
+    // (precipitation / wind / thunder). A listed sound that still hangs on a
+    // Vanilla-defined category (Ambience, ...) has no slider of its own: it
+    // gets a runtime category per type under that parent, exactly like the
+    // per-mod categories. A sound a mod already put on its own category
+    // (NAT, True Storms, Volume Sliders for Weather and its patches) is left
+    // alone, so no load-order rules are needed; when such a mod slider exists
+    // for a type, ours is labelled "... other" to tell the two apart.
+    // Precipitation is Rain or Snow by the flags of the weathers using it.
+    // Not found this way: the Vanilla interior rain loop, which no record
+    // references (the engine plays it).
+    void PlanWeatherCategories(RE::TESDataHandler* a_dataHandler)
+    {
+        enum Kind : std::size_t { kRain, kSnow, kThunder, kWind, kKinds };
+        static constexpr std::array<std::string_view, kKinds> kNames{ "Rain"sv, "Snow"sv, "Thunder"sv, "Wind"sv };
+
+        struct Usage
+        {
+            RE::BGSSoundDescriptorForm*    form{ nullptr };
+            std::array<std::size_t, kKinds> votes{};
+        };
+        std::unordered_map<RE::BGSSoundDescriptor*, Usage> usages;
+        std::size_t                                         weathers = 0;
+        for (auto* weather : a_dataHandler->GetFormArray<RE::TESWeather>()) {
+            if (!weather) {
+                continue;
+            }
+            ++weathers;
+            const bool snowy = weather->data.flags.any(RE::TESWeather::WeatherDataFlag::kSnow) &&
+                               !weather->data.flags.any(RE::TESWeather::WeatherDataFlag::kRainy);
+            for (auto* sound : weather->sounds) {
+                if (!sound) {
+                    continue;
+                }
+                Kind kind = kKinds;
+                switch (sound->type.get()) {
+                case RE::TESWeather::SoundType::kPrecip:
+                    kind = snowy ? kSnow : kRain;
+                    break;
+                case RE::TESWeather::SoundType::kThunder:
+                    kind = kThunder;
+                    break;
+                case RE::TESWeather::SoundType::kWind:
+                    kind = kWind;
+                    break;
+                default:
+                    break;  // "Default" entries are general ambience, not weather noise
+                }
+                if (kind == kKinds) {
+                    continue;
+                }
+                // The entry names a sound descriptor, or a SOUN wrapping one.
+                auto* form = RE::TESForm::LookupByID(sound->soundFormID);
+                auto* descriptorForm = form ? form->As<RE::BGSSoundDescriptorForm>() : nullptr;
+                if (!descriptorForm && form) {
+                    if (const auto* soun = form->As<RE::TESSound>()) {
+                        descriptorForm = soun->descriptor;
+                    }
+                }
+                if (!descriptorForm || !descriptorForm->soundDescriptor) {
+                    continue;
+                }
+                auto& usage = usages[descriptorForm->soundDescriptor];
+                usage.form = descriptorForm;
+                ++usage.votes[kind];
+            }
+        }
+
+        const auto srdConfigs = LoadSrdCategoryConfigs();
+        const auto excludes = ReadExcludeList();
+        std::array<bool, kKinds> coveredByMod{};
+        std::size_t              onModCategory = 0, engineManaged = 0, skipped = 0, moved = 0;
+        std::vector<ModCategoryPlan>                          plans;
+        std::vector<Kind>                                     planKinds;
+        std::vector<std::vector<RE::BGSSoundDescriptorForm*>> planForms;  // for the log
+        for (auto& [descriptor, usage] : usages) {
+            const auto kind = static_cast<Kind>(
+                std::distance(usage.votes.begin(), std::max_element(usage.votes.begin(), usage.votes.end())));
+            auto* category = descriptor->category;
+            if (!category) {
+                ++skipped;
+                continue;
+            }
+            const auto* categoryFiles = category->sourceFiles.array;
+            const auto* categoryDefiner = (categoryFiles && !categoryFiles->empty()) ? categoryFiles->front() : nullptr;
+            if (!categoryDefiner || !IsVanillaFile(categoryDefiner->GetFilename())) {
+                coveredByMod[kind] = true;  // a mod routes this sound through its own category
+                ++onModCategory;
+                continue;
+            }
+            if (IsEngineManagedVanillaCategory(*category)) {
+                ++engineManaged;
+                continue;
+            }
+            const auto* sourceFiles = usage.form->sourceFiles.array;
+            const auto* source = (sourceFiles && !sourceFiles->empty()) ? sourceFiles->front() : nullptr;
+            const std::string pluginFile{ source ? source->GetFilename() : std::string_view{} };
+            if (IsExcluded(excludes, pluginFile) ||
+                SrdAssignsCategory(srdConfigs, pluginFile, usage.form->GetLocalFormID())) {
+                ++skipped;
+                continue;
+            }
+            std::size_t planIndex = 0;
+            for (; planIndex < plans.size(); ++planIndex) {
+                if (planKinds[planIndex] == kind && plans[planIndex].parent == category) {
+                    break;
+                }
+            }
+            if (planIndex == plans.size()) {
+                ModCategoryPlan plan;
+                plan.pluginFile = std::string(kWeatherOwner);
+                plan.parent = category;
+                // GetLocalFormID: the parent is Vanilla-defined, so the key
+                // does not depend on the load order.
+                plan.persistKey = std::format("weather:{}|{:08X}", kNames[kind], category->GetLocalFormID());
+                plans.push_back(std::move(plan));
+                planKinds.push_back(kind);
+                planForms.emplace_back();
+            }
+            plans[planIndex].descriptors.push_back(descriptor);
+            planForms[planIndex].push_back(usage.form);
+        }
+
+        // Where a mod already has a slider for the type, a single left-over
+        // sound is not worth a second one (lab, 2026-11-24: every weather mod
+        // left exactly one thunder descriptor behind): it stays where it is.
+        std::size_t leftAlone = 0;
+        for (std::size_t index = plans.size(); index-- > 0;) {
+            if (coveredByMod[planKinds[index]] && plans[index].descriptors.size() < 2) {
+                for (const auto* form : planForms[index]) {
+                    logs::info("Weather sound {:08X} ({}) stays on its Vanilla slider: the only one a mod's {} slider "
+                               "does not cover",
+                        form->GetFormID(), SourceFilesText(*form), kNames[planKinds[index]]);
+                }
+                leftAlone += plans[index].descriptors.size();
+                plans.erase(plans.begin() + static_cast<std::ptrdiff_t>(index));
+                planKinds.erase(planKinds.begin() + static_cast<std::ptrdiff_t>(index));
+                planForms.erase(planForms.begin() + static_cast<std::ptrdiff_t>(index));
+            }
+        }
+        std::vector<const RE::BGSSoundDescriptor*> claimed;
+        for (const auto& plan : plans) {
+            claimed.insert(claimed.end(), plan.descriptors.begin(), plan.descriptors.end());
+            moved += plan.descriptors.size();
+        }
+
+        // A weather sound of a mod without own slider was planned into that
+        // mod's "<Mod> (Ambience)" category: the weather slider takes it.
+        for (auto& plan : g_modPlans) {
+            std::erase_if(plan.descriptors, [&](const RE::BGSSoundDescriptor* a_descriptor) {
+                return std::find(claimed.begin(), claimed.end(), a_descriptor) != claimed.end();
+            });
+        }
+        std::erase_if(g_modPlans, [](const ModCategoryPlan& a_plan) { return a_plan.descriptors.empty(); });
+
+        for (std::size_t index = 0; index < plans.size(); ++index) {
+            const auto kind = planKinds[index];
+            const auto sameKind = static_cast<std::size_t>(std::count(planKinds.begin(), planKinds.end(), kind));
+            std::string detail = coveredByMod[kind] ? "weather, other" : "weather";
+            if (sameKind > 1) {
+                if (const auto parentLabel = ParentLabel(*plans[index].parent); !parentLabel.empty()) {
+                    detail += ", " + parentLabel;
+                }
+            }
+            plans[index].label = std::format("{} ({})", kNames[kind], detail);
+            for (const auto* form : planForms[index]) {
+                logs::info("Weather slider '{}': sound {:08X} ({})", plans[index].label, form->GetFormID(),
+                    SourceFilesText(*form));
+            }
+            g_modPlans.push_back(std::move(plans[index]));
+        }
+        logs::info("Weather sounds: {} descriptor(s) listed by {} weather(s) as precipitation / thunder / wind: "
+                   "{} on a mod's own category, {} engine-managed, {} excluded or without category, "
+                   "{} single left-over(s) left alone, {} get {} weather slider(s)",
+            usages.size(), weathers, onModCategory, engineManaged, skipped, leftAlone, moved, plans.size());
+    }
+
     void CreateModCategories()
     {
         auto* factory = RE::IFormFactory::GetConcreteFormFactoryByType<RE::BGSSoundCategory>();
@@ -1318,7 +1694,9 @@ namespace
             }
             const auto parentLabel = ParentLabel(*plan.parent);
             auto       label = ShortModName(plan.pluginFile);
-            if (sameMod > 1 && !parentLabel.empty()) {
+            if (!plan.label.empty()) {
+                label = plan.label;
+            } else if (sameMod > 1 && !parentLabel.empty()) {
                 label = std::format("{} ({})", label, parentLabel);
             }
 
@@ -1345,7 +1723,9 @@ namespace
             entry->ownerFileName = plan.pluginFile;
             // GetLocalFormID, not a mask: an ESL-defined parent's FE-prefixed
             // slot is load-order-dependent and must stay out of the key.
-            entry->persistKey = std::format("mod:{}|{:08X}", plan.pluginFile, plan.parent->GetLocalFormID());
+            entry->persistKey = !plan.persistKey.empty() ?
+                                    plan.persistKey :
+                                    std::format("mod:{}|{:08X}", plan.pluginFile, plan.parent->GetLocalFormID());
             logs::info("Mod category '{}' {:08X} for {} descriptor(s) of '{}' (parent {:08X} '{}', key '{}')", label,
                 entry->formID, plan.descriptors.size(), plan.pluginFile, plan.parent->GetFormID(), parentLabel,
                 entry->persistKey);
@@ -1397,6 +1777,190 @@ namespace
         }
         BroadcastVolumeChanged();
     }
+
+    bool HasEngineSlot(const QAS::Audio::Entry& a_entry)
+    {
+        return !a_entry.synthetic && a_entry.slot >= 0 && a_entry.slot < g_engineSlots;
+    }
+
+    // What the menu sliders and the Vanilla master held when the Journal Menu
+    // opened, or at the last look since (game thread). Only a value that
+    // moves while the Journal is open was changed in Settings > Audio; a
+    // value another mod set before (a temporary Papyrus SetVolume) is not
+    // the user's setting and stays out of the store.
+    std::atomic<bool>  g_journalOpen{ false };
+    std::vector<float> g_journalSeen;    // raw volumeMult per entry
+    std::vector<bool>  g_journalCapped;  // root set above the global multiplier: cap it when the Journal closes
+    float              g_journalMaster{ -1.0F };
+
+    // Game thread, when the Journal Menu opens.
+    void JournalOpened()
+    {
+        g_journalSeen.assign(g_entries.size(), 0.0F);
+        g_journalCapped.assign(g_entries.size(), false);
+        for (std::size_t index = 0; index < g_entries.size(); ++index) {
+            g_journalSeen[index] = g_entries[index]->category->volumeMult;
+        }
+        const auto* setting = FindPref(kMasterSetting);
+        g_journalMaster = setting ? Clamp01(setting->data.f) : -1.0F;
+        g_journalOpen.store(true);
+    }
+
+    // Game thread. A menu slider (or the Vanilla master) that moved while the
+    // Journal Menu is open was changed in Settings > Audio: take the new
+    // value into the store, otherwise the next start would put the old one
+    // back. Runs a few times a second while the Journal is open (the game
+    // can be quit from there without the menu ever closing) and once more
+    // when it closes. "Extra Sliders" are left out: nothing but this plugin
+    // offers them.
+    void AdoptJournalChanges(bool a_closing)
+    {
+        if (!g_ready.load() || !g_journalOpen.load() || g_journalSeen.size() != g_entries.size()) {
+            return;
+        }
+        // A close event that never arrived must not leave the watch on:
+        // from then on other mods' changes would be stored again.
+        if (auto* ui = RE::UI::GetSingleton(); !a_closing && ui && !ui->IsMenuOpen(RE::JournalMenu::MENU_NAME)) {
+            g_journalOpen.store(false);
+            return;
+        }
+        std::size_t adopted = 0;
+        for (std::size_t index = 0; index < g_entries.size(); ++index) {
+            auto& entry = *g_entries[index];
+            if (entry.synthetic || entry.pending.load() || entry.dirty.load()) {
+                continue;
+            }
+            const float raw = entry.category->volumeMult;
+            if (const float seenBefore = g_journalSeen[index]; std::abs(raw - seenBefore) > kVolumeEpsilon) {
+                g_journalSeen[index] = raw;
+                float current = Clamp01(raw);
+                // A root that is also a menu slider holds baseline x global
+                // while the multiplier is active. The Vanilla menu sets
+                // volumeMult directly: the value divided by the multiplier
+                // is the new baseline. Not while the global slider is being
+                // dragged: g_global is then ahead of what was applied.
+                if (auto* root = FindRoot(entry.category); root && g_globalActive.load(std::memory_order_relaxed)) {
+                    const float global = g_global.load();
+                    if (g_globalDirty.load() || global <= kVolumeEpsilon) {
+                        g_journalSeen[index] = seenBefore;  // look again next time
+                        continue;
+                    }
+                    current = Clamp01(raw / global);
+                    root->baseline.store(current, std::memory_order_relaxed);
+                    // Above the multiplier no baseline reaches the value: the
+                    // root is capped at the multiplier when the Journal closes.
+                    g_journalCapped[index] = raw > global + kVolumeEpsilon;
+                }
+                if (std::abs(current - entry.savedVolume) > kVolumeEpsilon) {
+                    if (const auto key = PluginIniKey(entry); !key.empty()) {
+                        const bool ok = WritePluginVolume(key, current);
+                        logs::info("Adopted {:08X} '{}' key '{}': {:.4f} -> {:.4f}, changed in the Vanilla menu ({})",
+                            entry.formID, entry.label, key, entry.savedVolume, current, ok ? "stored" : "NOT STORED");
+                        entry.savedVolume = current;
+                        entry.uiVolume = current;
+                        ++adopted;
+                    }
+                }
+            }
+            if (a_closing && g_journalCapped[index]) {
+                // Apply the cap now, so it sounds the same before and after
+                // the next start.
+                const float global = g_global.load();
+                logs::info("{:08X} '{}' was set to {:.4f}, above the global multiplier {:.4f}: capped at the multiplier",
+                    entry.formID, entry.label, raw, global);
+                ApplyNow(entry, 1.0F);
+                if (HasEngineSlot(entry)) {
+                    WriteFloatPref(std::format("fVal{}", entry.slot), entry.category->volumeMult);
+                }
+                g_journalCapped[index] = false;
+            }
+        }
+        if (const auto* setting = FindPref(kMasterSetting)) {
+            const float master = Clamp01(setting->data.f);
+            if (g_journalMaster < 0.0F || std::abs(master - g_journalMaster) > kVolumeEpsilon) {
+                g_journalMaster = master;
+                if (g_savedMaster < 0.0F || std::abs(master - g_savedMaster) > kVolumeEpsilon) {
+                    const bool ok = WritePluginVolume(kVanillaMasterKey, master);
+                    logs::info("Adopted Vanilla master: {:.4f} -> {:.4f} ({})", g_savedMaster, master,
+                        ok ? "stored" : "NOT STORED");
+                    g_savedMaster = master;
+                    ++adopted;
+                }
+            }
+        }
+        if (adopted > 0) {
+            logs::info("{} value(s) changed in the Vanilla menu taken into the volume store", adopted);
+        }
+        if (a_closing) {
+            g_journalOpen.store(false);
+        }
+    }
+
+    // Any menu closing stores sliders that were moved but never persisted;
+    // the Journal Menu (Settings > Audio) is watched for what the Vanilla
+    // menu changes.
+    class MenuCloseSink final : public RE::BSTEventSink<RE::MenuOpenCloseEvent>
+    {
+    public:
+        RE::BSEventNotifyControl ProcessEvent(const RE::MenuOpenCloseEvent* a_event,
+            RE::BSTEventSource<RE::MenuOpenCloseEvent>*) override
+        {
+            if (a_event && g_ready.load()) {
+                const char* name = a_event->menuName.c_str();
+                const bool  journal = name && std::string_view{ name } == "Journal Menu"sv;
+                auto*       tasks = SKSE::GetTaskInterface();
+                if (!tasks) {
+                    return RE::BSEventNotifyControl::kContinue;
+                }
+                if (a_event->opening) {
+                    if (journal) {
+                        tasks->AddTask([]() { JournalOpened(); });
+                    }
+                    return RE::BSEventNotifyControl::kContinue;
+                }
+                tasks->AddTask([journal]() {
+                    QAS::Audio::FlushDirty();
+                    if (!journal) {
+                        return;
+                    }
+                    // Queued behind the persist tasks FlushDirty() added.
+                    if (auto* later = SKSE::GetTaskInterface()) {
+                        later->AddTask([]() { AdoptJournalChanges(true); });
+                    }
+                });
+            }
+            return RE::BSEventNotifyControl::kContinue;
+        }
+    };
+
+    void RegisterMenuCloseSink()
+    {
+        static MenuCloseSink sink;
+        static bool          registered = false;
+        if (registered) {
+            return;
+        }
+        if (auto* ui = RE::UI::GetSingleton()) {
+            ui->AddEventSink<RE::MenuOpenCloseEvent>(&sink);
+            registered = true;
+            // Looks at the sliders four times a second while the Journal is
+            // open. A timer thread, not a task that queues itself: the task
+            // queue is emptied in one go.
+            std::thread([]() {
+                for (;;) {
+                    std::this_thread::sleep_for(std::chrono::milliseconds(250));
+                    if (!g_journalOpen.load()) {
+                        continue;
+                    }
+                    if (auto* tasks = SKSE::GetTaskInterface()) {
+                        tasks->AddTask([]() { AdoptJournalChanges(false); });
+                    }
+                }
+            }).detach();
+        } else {
+            logs::warn("UI singleton unavailable; changes made in the Vanilla audio menu are not taken into the store");
+        }
+    }
 }
 
 namespace QAS::Audio
@@ -1409,11 +1973,14 @@ namespace QAS::Audio
         logs::info("Preference INI: '{}'", g_prefsPath);
 
         // The Vanilla master (fAudioMasterVolume / BSAudioManager::masterVolume)
-        // is left to the Vanilla menu; the "Alle Sounds" multiplier covers
-        // every root category instead. Logged for diagnostics only.
-        bool repairMaster = false;
+        // has no slider here (the "Alle Sounds" multiplier covers every root
+        // category instead), but its value is kept in the volume store like
+        // the sliders', so it survives a SkyrimPrefs.ini that is not saved.
+        bool  repairMaster = false;
+        float currentMaster = -1.0F;
         if (const auto* setting = FindPref(kMasterSetting)) {
-            logs::info("Vanilla master (not managed here): {} = {:.4f}", kMasterSetting, setting->data.f);
+            currentMaster = Clamp01(setting->data.f);
+            logs::info("Vanilla master: {} = {:.4f}", kMasterSetting, setting->data.f);
             repairMaster = setting->data.f <= 0.0F;
         }
 
@@ -1445,12 +2012,46 @@ namespace QAS::Audio
         }
         g_pluginIniPath = ResolvePluginIniPath();
         EnsurePluginIni();
-        logs::info("Categories from slot {} on are persisted in '{}' and restored by this plugin",
-            g_engineSlots, g_pluginIniPath);
+        g_fallbackIniPath.clear();
+        g_fallbackActive = false;
+        g_storeIdentity = ResolveStoreIdentity();
+        g_fallbackSection = FallbackSectionFor(g_storeIdentity);
+        if (auto logDir = SKSE::log::log_directory()) {
+            std::error_code ec;
+            g_fallbackIniPath = (*logDir / "QuickAudioSliders.ini").string();
+            // Only this installation's section counts: the file is shared by
+            // every modlist of this Windows user.
+            g_fallbackActive = std::filesystem::exists(std::filesystem::path(g_fallbackIniPath), ec) &&
+                               CountStoreValues(g_fallbackIniPath) > 0;
+        }
+        logs::info("Volume store: '{}' (file '{}') with {} [Volumes] line(s); fallback '{}' [{}] {}", g_pluginIniPath,
+            g_storeIdentity, CountStoreValues(g_pluginIniPath), g_fallbackIniPath, g_fallbackSection,
+            g_fallbackActive ? std::format("with {} line(s)", CountStoreValues(g_fallbackIniPath)) : "not in use"s);
+        // For support: Engine Fixes restores sound category volumes from its
+        // own file at kDataLoaded, before the store is applied. Whether it is
+        // there explains a "was X" in the "Restored" lines below.
+        {
+            const bool      loaded = GetModuleHandleW(L"EngineFixes.dll") != nullptr ||
+                                     GetModuleHandleW(L"EngineFixesVR.dll") != nullptr;
+            std::error_code ec;
+            const auto      snct = std::filesystem::absolute("Data/SKSE/Plugins/EngineFixes_SNCT.ini", ec);
+            std::string     file = "no EngineFixes_SNCT.ini";
+            if (!ec && std::filesystem::exists(snct, ec)) {
+                std::ifstream in(snct);
+                std::size_t   values = 0;
+                for (std::string line; std::getline(in, line);) {
+                    values += line.find('=') != std::string::npos ? 1 : 0;
+                }
+                file = std::format("EngineFixes_SNCT.ini with {} value(s)", values);
+            }
+            logs::info("Engine Fixes: {}; {}", loaded ? "loaded" : "not loaded", file);
+        }
         const bool modCategoriesEnabled = ReadIniInt(kModCategoriesSection, QAS::Ini::kModCategoriesEnabledKey,
                                               QAS::Ini::kModCategoriesEnabledDefault ? 1 : 0) != 0;
         const int  modCategoriesMinSounds = ReadIniInt(kModCategoriesSection, "MinSounds", 3);
-        logs::info("[ModCategories] Enabled={} MinSounds={}", modCategoriesEnabled ? 1 : 0, modCategoriesMinSounds);
+        const bool weatherCategoriesEnabled = ReadIniInt(kModCategoriesSection, "Weather", 1) != 0;
+        logs::info("[ModCategories] Enabled={} MinSounds={} Weather={}", modCategoriesEnabled ? 1 : 0,
+            modCategoriesMinSounds, weatherCategoriesEnabled ? 1 : 0);
 
         auto* dataHandler = RE::TESDataHandler::GetSingleton();
         if (!dataHandler) {
@@ -1496,29 +2097,102 @@ namespace QAS::Audio
         if (modCategoriesEnabled) {
             AddUnlistedModCategories(dataHandler);
             PlanModCategories(dataHandler, modCategoriesMinSounds);
+            if (weatherCategoriesEnabled) {
+                PlanWeatherCategories(dataHandler);
+            }
             CreateModCategories();
         }
 
-        // Categories without an engine slot (and runtime categories): restore
-        // from the plugin INI.
-        std::vector<std::pair<std::size_t, float>> restores;
+        // Every slider is restored from the volume store. An INI written by
+        // a version before the store owned the engine-slot categories can be
+        // older than SkyrimPrefs.ini for those (the Vanilla menu changed
+        // them without the plugin noticing): on the first start of this
+        // version a stored value is only trusted where it matches the
+        // engine's fVal<n>, otherwise the current value is taken over.
+        struct Restore
+        {
+            std::size_t index;
+            float       volume;
+            float       found;
+        };
+        const bool           ownsAll = ReadPluginVolume(kOwnsAllKey).has_value();
+        const auto           migrationGlobal = ReadPluginVolume(kGlobalKey);
+        std::vector<Restore> restores;
+        std::size_t          withoutValue = 0;
         for (std::size_t index = 0; index < g_entries.size(); ++index) {
-            auto& entry = *g_entries[index];
-            if (!entry.synthetic && entry.slot < g_engineSlots) {
-                continue;
-            }
+            auto&       entry = *g_entries[index];
+            const float current = ReadVolume(entry);
+            entry.savedVolume = current;
             const auto key = PluginIniKey(entry);
             if (key.empty()) {
                 logs::warn("Category {:08X} '{}' has no defining file; cannot persist it", entry.formID, entry.editorID);
                 continue;
             }
-            if (const auto volume = ReadPluginVolume(key)) {
-                entry.uiVolume = *volume;
-                restores.emplace_back(index, *volume);
-            } else {
-                logs::info("Category {:08X} '{}' (slot {}) key '{}': no stored volume", entry.formID, entry.label,
-                    entry.slot, key);
+            const auto stored = ReadPluginVolume(key);
+            if (!stored) {
+                ++withoutValue;
+                continue;
             }
+            if (!ownsAll && HasEngineSlot(entry)) {
+                const auto* slotValue = FindPref(std::format("fVal{}:{}", entry.slot, kSection));
+                // A root that is also a menu slider holds baseline x global
+                // while the multiplier is active, and the engine saves that
+                // scaled value on exit: fVal<n> then equals stored x global,
+                // and the stored baseline is still the right one.
+                const bool  scaledRoot = !entry.category->parentCategory && migrationGlobal &&
+                                         *migrationGlobal < kGlobalIdentity;
+                const float scale = scaledRoot ? *migrationGlobal : 1.0F;
+                const bool  matches =
+                    slotValue && (std::abs(slotValue->data.f - *stored) <= kVolumeEpsilon ||
+                                     (scaledRoot && (scale <= kVolumeEpsilon ||
+                                                        std::abs(slotValue->data.f - *stored * scale) <= 2.0F * kVolumeEpsilon)));
+                if (!matches) {
+                    // Changed in the Vanilla menu since. For a scaled root the
+                    // current value includes the multiplier: take it out, the
+                    // multiplier is applied again below.
+                    // With Engine Fixes the current value is the one from its
+                    // EngineFixes_SNCT.ini (it ran before us and its
+                    // SetCategoryVolume also filled fVal<n> in memory). That
+                    // is what the user heard under the old version, which
+                    // left these categories to the engine and Engine Fixes.
+                    const float found = current;
+                    const float adopted = scaledRoot ? Clamp01(found / scale) : found;
+                    const bool  ok = WritePluginVolume(key, adopted);
+                    if (scaledRoot && found > scale + kVolumeEpsilon) {
+                        logs::info("Category {:08X} '{}': {:.4f} is above the global multiplier {:.4f}; it is capped at "
+                                   "the multiplier",
+                            entry.formID, entry.label, found, scale);
+                    }
+                    logs::info("Category {:08X} '{}' (slot {}) key '{}': stored {:.4f} predates SkyrimPrefs.ini, "
+                               "taking over the current {:.4f}{} ({})",
+                        entry.formID, entry.label, entry.slot, key, *stored, adopted,
+                        scaledRoot ? std::format(" (found {:.4f} with the global multiplier {:.4f})", found, scale) : ""s,
+                        ok ? "stored" : "NOT STORED");
+                    if (scaledRoot) {
+                        entry.uiVolume = adopted;
+                        entry.savedVolume = adopted;
+                        restores.push_back(Restore{ index, adopted, current });
+                    }
+                    continue;
+                }
+            }
+            entry.uiVolume = *stored;
+            entry.savedVolume = *stored;
+            restores.push_back(Restore{ index, *stored, current });
+        }
+        logs::info("{} slider(s) have a stored volume, {} have none yet (they keep the value found at startup)",
+            restores.size(), withoutValue);
+        if (!ownsAll) {
+            WritePluginVolume(kOwnsAllKey, 1.0F);
+        }
+
+        // Vanilla master: a stored value wins over what the engine loaded.
+        const auto storedMaster = ReadPluginVolume(kVanillaMasterKey);
+        g_savedMaster = storedMaster.value_or(currentMaster);
+        const bool restoreMaster =
+            storedMaster && currentMaster >= 0.0F && std::abs(*storedMaster - currentMaster) > kVolumeEpsilon;
+        if (storedMaster) {
+            repairMaster = false;  // the store decides, including a deliberate 0
         }
 
         BuildGroups();
@@ -1537,25 +2211,51 @@ namespace QAS::Audio
             logs::info("Vanilla master is 0 but was repaired once before; leaving it to the Vanilla menu");
             repairMaster = false;
         }
-        auto applyRestores = [restores = std::move(restores), savedGlobal, repairMaster]() {
+        auto applyRestores = [restores = std::move(restores), savedGlobal, repairMaster, restoreMaster, storedMaster]() {
             if (repairMaster) {
                 RestoreVanillaMaster("startup repair: fAudioMasterVolume was 0");
                 WritePluginVolume(kMasterRepairedKey, 1.0F);
+            } else if (restoreMaster) {
+                ApplyVanillaMaster(*storedMaster);
+                logs::info("Vanilla master restored to {:.4f} from the volume store", *storedMaster);
             }
             RepointModDescriptors();
-            for (const auto& [index, volume] : restores) {
-                auto& entry = *g_entries[index];
-                ApplyNow(entry, volume);
-                logs::info("Restored {:08X} {} '{}' (slot {}) key '{}' volume {:.4f} from '{}'", entry.formID,
-                    entry.editorID, entry.label, entry.slot, PluginIniKey(entry), volume, g_pluginIniPath);
+            std::size_t overridden = 0;
+            for (const auto& restore : restores) {
+                auto& entry = *g_entries[restore.index];
+                // What the category holds now, after every kDataLoaded
+                // listener ran (Engine Fixes applies its own file there).
+                const float before = entry.category->volumeMult;
+                const bool  differs = std::abs(before - restore.volume) > kVolumeEpsilon ||
+                                     std::abs(restore.found - restore.volume) > kVolumeEpsilon;
+                ApplyNow(entry, restore.volume);
+                if (!differs) {
+                    continue;
+                }
+                ++overridden;
+                logs::info("Restored {:08X} {} '{}' (slot {}) key '{}' volume {:.4f} (was {:.4f})", entry.formID,
+                    entry.editorID, entry.label, entry.slot, PluginIniKey(entry), restore.volume, before);
+                if (HasEngineSlot(entry)) {
+                    // Keep [AudioMenu] in step, so the Vanilla menu shows the
+                    // restored value and the engine saves it from now on.
+                    WriteUIntPref(std::format("uID{}", entry.slot), entry.formID);
+                    WriteFloatPref(std::format("fVal{}", entry.slot), restore.volume);
+                }
             }
+            logs::info("{} of {} stored volume(s) differed from what the game had loaded", overridden, restores.size());
             if (savedGlobal) {
                 g_global.store(*savedGlobal);
                 ApplyGlobalNow(*savedGlobal);
                 logs::info("Restored global multiplier {:.4f} from '{}'", *savedGlobal, g_pluginIniPath);
             }
-            logs::info("{} volume(s) restored from the plugin INI; sliders ready", restores.size());
+            // Baseline for "changed outside this plugin": what every slider
+            // holds now that all kDataLoaded listeners and the store ran.
+            for (auto& entry : g_entries) {
+                entry->savedVolume = ReadVolume(*entry);
+            }
+            logs::info("{} volume(s) applied from the volume store; sliders ready", restores.size());
             g_ready.store(true);
+            RegisterMenuCloseSink();
         };
         if (auto* tasks = SKSE::GetTaskInterface()) {
             tasks->AddTask(std::move(applyRestores));
@@ -1569,6 +2269,21 @@ namespace QAS::Audio
         return g_global.load();
     }
 
+    bool SliderFor(const RE::BGSSoundCategory* a_category, std::string& a_label, bool& a_extraPage)
+    {
+        // Bounded walk: a malformed plugin could make the parents a cycle.
+        for (int depth = 0; a_category && depth < 16; ++depth, a_category = a_category->parentCategory) {
+            for (const auto& entry : g_entries) {
+                if (entry->category == a_category) {
+                    a_label = entry->label;
+                    a_extraPage = entry->synthetic;
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
     std::size_t RootCount()
     {
         return g_roots.size();
@@ -1578,19 +2293,54 @@ namespace QAS::Audio
     {
         const auto multiplier = Clamp01(a_multiplier);
         g_global.store(multiplier);
+        g_globalDirty.store(true);
         if (auto* tasks = SKSE::GetTaskInterface()) {
             tasks->AddTask([multiplier]() { ApplyGlobalNow(multiplier); });
+        }
+    }
+
+    bool GlobalDirty()
+    {
+        return g_globalDirty.load();
+    }
+
+    void FlushDirty()
+    {
+        for (std::size_t index = 0; index < g_entries.size(); ++index) {
+            if (g_entries[index]->dirty.load() && !g_entries[index]->pending.load()) {
+                logs::info("Storing '{}' now: it was moved but never released", g_entries[index]->label);
+                Persist(index);
+            }
+        }
+        if (g_globalDirty.load()) {
+            PersistGlobal();
         }
     }
 
     void PersistGlobal()
     {
         const auto multiplier = Clamp01(g_global.load());
+        g_globalDirty.store(false);
         if (auto* tasks = SKSE::GetTaskInterface()) {
             tasks->AddTask([multiplier]() {
                 const auto ok = WritePluginVolume(kGlobalKey, multiplier);
-                logs::info("Persisted [{}] {} = {:.4f} to '{}' ({})", kVolumesSection, kGlobalKey, multiplier,
-                    g_pluginIniPath, ok ? "ok" : "FAILED");
+                logs::info("Persisted [{}] {} = {:.4f} ({})", kVolumesSection, kGlobalKey, multiplier,
+                    ok ? "ok" : "FAILED");
+                // A root that is also a menu slider carries baseline x global
+                // in volumeMult, and other plugins (Engine Fixes) save that
+                // scaled value. Store the baseline, so the next start puts it
+                // back before the multiplier is applied again.
+                for (auto& entryPtr : g_entries) {
+                    auto& entry = *entryPtr;
+                    if (entry.synthetic || !FindRoot(entry.category)) {
+                        continue;
+                    }
+                    const auto  key = PluginIniKey(entry);
+                    const float baseline = ReadVolume(entry);
+                    if (!key.empty() && WritePluginVolume(key, baseline)) {
+                        entry.savedVolume = baseline;
+                    }
+                }
             });
         }
     }
@@ -1670,6 +2420,7 @@ namespace QAS::Audio
         auto&      entry = *g_entries[a_index];
         const auto volume = Clamp01(a_volume);
         entry.uiVolume = volume;
+        entry.dirty.store(true);
         entry.pending.store(true);
         if (auto* tasks = SKSE::GetTaskInterface()) {
             tasks->AddTask([a_index, volume]() {
@@ -1722,20 +2473,20 @@ namespace QAS::Audio
             return;
         }
         const auto volume = Clamp01(g_entries[a_index]->uiVolume);
+        g_entries[a_index]->dirty.store(false);
         if (auto* tasks = SKSE::GetTaskInterface()) {
             tasks->AddTask([a_index, volume]() {
                 auto& entry = *g_entries[a_index];
                 ApplyNow(entry, volume);
-                // Plugin INI for every category, so the value follows the
-                // category even if a later load order moves it out of an
-                // engine slot. Restored only for categories without a slot.
+                // The volume store holds every slider and is what the next
+                // start applies.
                 if (const auto key = PluginIniKey(entry); !key.empty()) {
                     const auto ok = WritePluginVolume(key, volume);
-                    logs::info("Persisted [{}] {} = {:.4f} to '{}' ({})", kVolumesSection, key, volume,
-                        g_pluginIniPath, ok ? "ok" : "FAILED");
+                    logs::info("Persisted [{}] {} = {:.4f} ({})", kVolumesSection, key, volume, ok ? "ok" : "FAILED");
                 }
-                if (entry.synthetic || entry.slot >= g_engineSlots) {
-                    return;  // no engine slot: the plugin INI is the only store
+                entry.savedVolume = volume;
+                if (!HasEngineSlot(entry)) {
+                    return;  // no engine slot: nothing to mirror
                 }
                 // Always write the uID line too: the engine re-assigns free
                 // slots in memory at startup (InitItemImpl) without writing

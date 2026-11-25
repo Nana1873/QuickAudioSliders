@@ -1,6 +1,6 @@
 # Quick Audio Sliders
 
-**Version 1.0.3**
+**Version 1.1.0** (includes 1.0.3, which was never released separately)
 
 SKSE plugin for Skyrim SE/AE: an in-game volume panel rendered through
 [SKSE Menu Framework](https://www.nexusmods.com/skyrimspecialedition/mods/120352).
@@ -8,25 +8,48 @@ Page **"Volume"** shows every sound category flagged "Should appear on menu"
 as a slider, grouped by the mod that owns each category; page
 **"Extra Sliders"** adds automatic per-mod sliders for sound mods that route
 their sounds through vanilla categories and have no slider of their own
-(runtime-only categories, save-neutral). No more Escape → Settings → Audio.
+(runtime-only categories, save-neutral); page **"Now Playing"** lists the
+sounds the game requested since you entered the current place, loops first
+and single sounds from the last two minutes, with the slider that controls
+each (off with `[NowPlaying] Enabled=0`; voice lines and music started by
+file name are not listed). No more Escape → Settings → Audio.
 
 - Changes apply live through `BSISoundCategory::SetCategoryVolume` plus the
   engine's VolumeChanged broadcast, the same path the Vanilla slider uses;
   sounds already playing follow immediately. No INI reload tricks.
-- An "All Sounds (global)" slider on top scales every root sound category (menu-visible or not); saved in the plugin INI and applied on startup. The Vanilla master is left to the Vanilla menu (with a one-time stuck-at-0 repair).
+- An "All Sounds (global)" slider on top scales every root sound category (menu-visible or not); saved in the plugin INI and applied on startup. The Vanilla master has no slider here, but its value is kept in the plugin INI too and put back on startup (plus a one-time stuck-at-0 repair).
 - Mods contributing a single slider are pooled into an "Other Mods" group with a mod-name prefix.
 - "Reset" per slider and a two-click "Reset All" button restore the SNCT default menu values (UNAM) and global to 100%.
 - Groups are flat, always-visible section headings (Vanilla first, "Other Mods" last).
-- Values are persisted to `SkyrimPrefs.ini` `[AudioMenu]`
-  (`fVal<n>` / `uID<n>` per category slot, keyed by
-  the category's runtime FormID like the Vanilla menu does), so they survive
-  restarts and stay consistent with the Vanilla menu.
-- The engine only keeps eight `[AudioMenu]` slots (`uID0..uID7`). Categories
-  beyond that are saved by the plugin in
+- Every slider is saved by the plugin itself in
   `Data/SKSE/Plugins/QuickAudioSliders.ini` (`[Volumes]`, key
   `<plugin file>|<local FormID>`, e.g. `Audio Overhaul Skyrim.esp|00AA6E=0.5000`)
-  and re-applied at `kDataLoaded`. Load-order changes do not affect the key.
-  Under MO2 the file is created in `overwrite/SKSE/Plugins/`.
+  and re-applied on every start, after the engine and other plugins (Engine
+  Fixes' `EngineFixes_SNCT.ini`) restored theirs. Load-order changes do not
+  affect the key. Under MO2 the file is created in `overwrite/SKSE/Plugins/`.
+- Each write is read back. If the plugin INI does not take a value (read-only
+  file, virtual file system), it goes to
+  `Documents/My Games/Skyrim Special Edition/SKSE/QuickAudioSliders.ini`
+  instead, and the log says so. That file is shared by all modlists of the
+  Windows user, so each installation has its own section there
+  (`[Volumes.<hash>]`, with the plugin INI it stands in for as `PluginIni=`).
+- A change made in the Vanilla Settings > Audio menu is taken into the plugin
+  INI while the Journal Menu is open (checked four times a second, and when
+  it closes), so it is not overwritten on the next start, also when the game
+  is quit from that menu. Values other mods set outside the Journal
+  (Papyrus `SetVolume`) are not stored.
+- A root category (Word Walls, SkyParkour) set in the Vanilla menu above the
+  "All Sounds" multiplier is capped at the multiplier when the Journal closes.
+- The eight categories the engine keeps in `SkyrimPrefs.ini` `[AudioMenu]`
+  (`fVal<n>` / `uID<n>`) are still written there as well, so the Vanilla menu
+  shows the same values.
+- The log of the previous session is kept as `QuickAudioSliders.prev.log`.
+- Automatic weather sliders ("Rain (weather)", "Snow", "Thunder", "Wind" on the
+  Extra Sliders page) for the weather sounds no mod slider covers: sounds the
+  weather records list as precipitation / thunder / wind that still run through
+  a Vanilla category. Sounds a weather mod or Volume Sliders for Weather
+  already routes through its own category are left alone. Off with
+  `[ModCategories] Weather=0`.
 - Labels come from the game's own Scaleform translation table, so `$Effects`
   shows as "Effects" / "Effekte" in the player's language.
 
@@ -110,8 +133,8 @@ or keep single mods off the page with `Exclude=Some Mod.esp,Other.esp`.
 
 `tools\package.ps1` builds `dist\QuickAudioSliders-<version>.zip` from the
 built DLL (`SKSE/Plugins/`, no `.pdb`) and the translation files
-(`Interface/Translations/`). The Nexus page text lives in
-`docs/nexus-page.md`.
+(`Interface/Translations/`). The Nexus page text is kept locally in
+`docs/nexus-page.md` and is not part of the repository.
 
 ## License
 

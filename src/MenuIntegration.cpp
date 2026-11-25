@@ -1,6 +1,7 @@
 #include "MenuIntegration.h"
 
 #include "AudioSliders.h"
+#include "NowPlaying.h"
 #include "PluginIni.h"
 #include "SKSEMenuFramework.h"
 #include "Translation.h"
@@ -33,6 +34,10 @@ namespace
             QAS::Audio::Preview(a_index, percent / 100.0F);
         }
         if (ImGuiMCP::IsItemDeactivatedAfterEdit()) {
+            QAS::Audio::Persist(a_index);
+        } else if (entry.dirty.load() && !ImGuiMCP::IsItemActive()) {
+            // The release was missed (menu closed mid-drag, input path that
+            // never reports "deactivated after edit"): store the value now.
             QAS::Audio::Persist(a_index);
         }
         ImGuiMCP::PopID();
@@ -139,6 +144,8 @@ namespace
             }
             if (ImGuiMCP::IsItemDeactivatedAfterEdit()) {
                 QAS::Audio::PersistGlobal();
+            } else if (QAS::Audio::GlobalDirty() && !ImGuiMCP::IsItemActive()) {
+                QAS::Audio::PersistGlobal();  // missed release, see RenderSlider
             }
             ImGuiMCP::SameLine();
             RenderResetAll();
@@ -154,6 +161,83 @@ namespace
 
         ImGuiMCP::Spacing();
         ImGuiMCP::TextDisabled("%s", strings.footer.c_str());
+    }
+
+    // Page "Now Playing": what the game asked to play in the last minute and
+    // which slider controls it (see NowPlaying.h).
+    void __stdcall RenderNowPlaying()
+    {
+        const auto& strings = QAS::Translation::S();
+        if (!BeginPage()) {
+            return;
+        }
+        // The hint and long names wrap instead of running out of the panel.
+        ImGuiMCP::PushTextWrapPos(0.0F);
+        ImGuiMCP::TextDisabled("%s", strings.nowPlayingHint.c_str());
+        ImGuiMCP::PopTextWrapPos();
+        ImGuiMCP::Spacing();
+        const auto rows = QAS::NowPlaying::Snapshot();
+        if (rows.empty()) {
+            ImGuiMCP::TextDisabled("%s", strings.nowPlayingEmpty.c_str());
+        }
+        // Two sections, like the groups on the Volume page: loops, single sounds.
+        // Snapshot() delivers the rows in this order. One table per section
+        // with the same column weights, so the columns line up.
+        auto section = [&rows, &strings](int a_section, const std::string& a_title) {
+            auto belongs = [a_section](const QAS::NowPlaying::Row& a_row) {
+                return (a_row.loop ? 0 : 1) == a_section;
+            };
+            if (std::none_of(rows.begin(), rows.end(), belongs)) {
+                return;
+            }
+            ImGuiMCP::SeparatorText(a_title.c_str());
+            if (!ImGuiMCP::BeginTable(std::format("##nowplaying{}", a_section).c_str(), 4,
+                    ImGuiMCP::ImGuiTableFlags_SizingStretchProp | ImGuiMCP::ImGuiTableFlags_RowBg)) {
+                return;
+            }
+            ImGuiMCP::TableSetupColumn(strings.colSound.c_str(), ImGuiMCP::ImGuiTableColumnFlags_WidthStretch, 4.0F);
+            ImGuiMCP::TableSetupColumn(strings.colMod.c_str(), ImGuiMCP::ImGuiTableColumnFlags_WidthStretch, 3.0F);
+            ImGuiMCP::TableSetupColumn(strings.colSlider.c_str(), ImGuiMCP::ImGuiTableColumnFlags_WidthStretch, 3.0F);
+            ImGuiMCP::TableSetupColumn(strings.colAge.c_str(), ImGuiMCP::ImGuiTableColumnFlags_WidthStretch, 1.0F);
+            // The framework's themes leave the header background transparent,
+            // so the column titles read like one more row: give them a band
+            // in the theme's own text colour.
+            ImGuiMCP::PushStyleColor(ImGuiMCP::ImGuiCol_TableHeaderBg,
+                ImGuiMCP::GetColorU32(ImGuiMCP::ImGuiCol_Text, 0.18F));
+            ImGuiMCP::TableHeadersRow();
+            ImGuiMCP::PopStyleColor();
+            for (const auto& row : rows) {
+                if (!belongs(row)) {
+                    continue;
+                }
+                ImGuiMCP::TableNextRow();
+                ImGuiMCP::TableNextColumn();
+                if (row.count > 1) {
+                    ImGuiMCP::TextWrapped("%s (x%u)", row.sound.c_str(), row.count);
+                } else {
+                    ImGuiMCP::TextWrapped("%s", row.sound.c_str());
+                }
+                ImGuiMCP::TableNextColumn();
+                ImGuiMCP::TextWrapped("%s", row.plugin.c_str());
+                ImGuiMCP::TableNextColumn();
+                if (row.slider.empty()) {
+                    ImGuiMCP::TextDisabled("%s", strings.noSlider.c_str());
+                } else if (row.extraPage) {
+                    ImGuiMCP::TextWrapped("%s (%s)", row.slider.c_str(), strings.extraPageTag.c_str());
+                } else {
+                    ImGuiMCP::TextWrapped("%s", row.slider.c_str());
+                }
+                ImGuiMCP::TableNextColumn();
+                const auto age = row.secondsAgo < 90.0F ? std::format("{:.0f} s", row.secondsAgo) :
+                                                          std::format("{:.0f} min", row.secondsAgo / 60.0F);
+                ImGuiMCP::TextUnformatted(age.c_str());
+            }
+            ImGuiMCP::EndTable();
+        };
+        section(0, strings.sectionLoops);
+        section(1, strings.sectionSingle);
+        ImGuiMCP::Spacing();
+        ImGuiMCP::TextDisabled("%s", strings.nowPlayingLimits.c_str());
     }
 
     // [ModCategories] Enabled (default 1), read directly at kPostLoad (before
@@ -189,7 +273,11 @@ namespace QAS::MenuIntegration
         if (extraPage) {
             SKSEMenuFramework::AddSectionItem("Extra Sliders", RenderMods);
         }
-        logs::info("Registered SKSE Menu Framework section '{}' (framework v{}), pages: Volume{}", kSectionName,
-            version, extraPage ? ", Extra Sliders" : "");
+        const bool nowPlayingPage = QAS::NowPlaying::Enabled();
+        if (nowPlayingPage) {
+            SKSEMenuFramework::AddSectionItem("Now Playing", RenderNowPlaying);
+        }
+        logs::info("Registered SKSE Menu Framework section '{}' (framework v{}), pages: Volume{}{}", kSectionName,
+            version, extraPage ? ", Extra Sliders" : "", nowPlayingPage ? ", Now Playing" : "");
     }
 }

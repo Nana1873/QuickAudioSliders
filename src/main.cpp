@@ -1,5 +1,6 @@
 #include "AudioSliders.h"
 #include "MenuIntegration.h"
+#include "NowPlaying.h"
 #include "Translation.h"
 
 #include <spdlog/sinks/basic_file_sink.h>
@@ -13,6 +14,15 @@ namespace
             SKSE::stl::report_and_fail("Failed to find standard logging directory"sv);
         }
         const auto* plugin = SKSE::PluginDeclaration::GetSingleton();
+        // Keep the previous session's log: a "my sliders reverted" report
+        // needs the session that changed them, and the log is truncated on
+        // every start. One old file only, on purpose: no pile of logs on
+        // users' disks.
+        {
+            std::error_code ec;
+            const auto      previous = *path / std::format("{}.prev.log", plugin->GetName());
+            std::filesystem::rename(*path / std::format("{}.log", plugin->GetName()), previous, ec);
+        }
         *path /= std::format("{}.log", plugin->GetName());
         auto sink = std::make_shared<spdlog::sinks::basic_file_sink_mt>(path->string(), true);
         auto log = std::make_shared<spdlog::logger>("global log"s, std::move(sink));
@@ -34,6 +44,9 @@ namespace
             QAS::Translation::Import("QuickAudioSliders");
             QAS::Translation::LoadStrings();
             QAS::Audio::Initialize();
+            if (QAS::NowPlaying::Enabled()) {
+                QAS::NowPlaying::Install();
+            }
             break;
         default:
             break;
@@ -47,14 +60,22 @@ SKSEPluginLoad(const SKSE::LoadInterface* a_skse)
     SKSE::Init(a_skse, false);
 
     const auto* plugin = SKSE::PluginDeclaration::GetSingleton();
-    logs::info("{} v{} loaded (runtime {})",
+    // The log lines carry the time only; the date tells which session a
+    // log (or the kept previous one) belongs to.
+    SYSTEMTIME now{};
+    GetLocalTime(&now);
+    logs::info("{} v{} loaded (runtime {}) on {:04}-{:02}-{:02}",
         plugin->GetName(),
         plugin->GetVersion().string(),
-        REL::Module::get().version().string());
+        REL::Module::get().version().string(), now.wYear, now.wMonth, now.wDay);
 
     if (a_skse->IsEditor()) {
         logs::info("Creation Kit detected; plugin disabled");
         return false;
+    }
+
+    if (QAS::NowPlaying::Enabled()) {
+        QAS::NowPlaying::InstallNameCapture();
     }
 
     SKSE::GetMessagingInterface()->RegisterListener(MessageHandler);

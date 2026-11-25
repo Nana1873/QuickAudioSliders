@@ -537,8 +537,11 @@ checked in the original ESP), so alone it shows on the Volume page. VSfW's
 Cathedral patch overrides those three with the flag removed (0x1 / 0x0 / 0x0)
 and moves the sounds into its own categories. Likely case in that log (not
 verified, CWUU not inspected): the VSfW Cathedral patch hides the categories
-while the Unofficial Update, loading later, routes sounds back into them. A
-category that is hidden but still used had no slider anywhere:
+while the Unofficial Update, loading later, routes sounds back into them.
+(Not confirmed as the cause of the report: see the 2026-11-02 correction
+below. The Unofficial Update re-routes a single interior descriptor, and
+VSfW's sliders did control the outdoor rain and thunder.) A category that is
+hidden but still used had no slider anywhere:
 `PlanModCategories` skips sounds on mod-defined categories ("314 on mod-owned
 categories" in that log) assuming the mod provides the slider.
 
@@ -566,15 +569,298 @@ slider. Fix (1.0.3): unlisted mod categories need only one descriptor;
 `MinSounds` keeps applying to runtime categories only.
 
 Correction after in-game listening (same day): `Cathedral_Rain_Interior_LP`
-is NOT the main rain. Its conditions are `IsInInterior == 1` plus location
+is NOT the main rain. The 1.0.3 commit (5bbe0eb), the first version of the
+entry above and the code comment on `AddUnlistedModCategories` assumed it
+was, because 13 weathers list it as a precipitation sound. Its conditions are `IsInInterior == 1` plus location
 type keywords (house / inn / store / dwelling / player house, Dragonsreach,
 Temple of Kynareth) and exclusions (Markarth, parts of Solitude, the College,
-...); the outdoor rain descriptors (`Cathedral_Rain_Heavy_LP`, `_Medium...`)
+...); the outdoor rain loops (`Cathedral_Rain_Heavy_LP` and its Medium
+counterpart; the other editor IDs and the FormIDs were not written down)
 carry `IsInInterior == 0`. In the lab instance the interior loop was not
 audible anywhere (Sleeping Giant Inn, Dragonsreach), so the 1.0.3 slider is
 correct but drives a sound that did not play there. VSfW's Rain / Thunder
 sliders DID control Cathedral's outdoor rain and thunder with the Unofficial
-Update loaded, so phbd01's "VSfW doesn't work with the Unofficial Update"
-was not reproduced; likely a missing / disabled / overridden VSfW Cathedral
-patch on their side (asked for their load order). 1.0.3 stays in the repo but
-is not released separately.
+Update loaded, so phbd01's report (paraphrased, as recorded above: weather
+sounds not adjustable with the Unofficial Update, and no extra weather sliders
+on 1.0.2) was not reproduced; likely a missing / disabled / overridden VSfW
+Cathedral patch on their side (asked for their load order). 1.0.3 stays in
+the repo but is not released separately; the README says so next to the
+version number.
+
+## The plugin INI owns every volume (1.1.0, 2026-11-24)
+
+Nexus report (imAurorangel, 1.0.2, MO2 + Root Builder list, SkyrimPrefs.ini
+under OneDrive): "I set my general volume slider to 25%, when I reopen the
+game it goes back to 100%". Their log covers only the start after the
+restart: an existing, complete plugin INI, yet no `[Volumes]` value at all
+("no stored volume" for all 175 sliders, no "Restored global multiplier"),
+Vanilla master 1.0. Music, FlowerGirls SFX, Word Walls and SkyParkour start at
+0.2 although none has an engine slot and the plugin restored nothing, so
+another plugin restores volumes there, almost certainly Engine Fixes. Not
+known from that log: whether "general volume" is our global slider or the
+Vanilla master, and why nothing reached `[Volumes]` (the session that changed
+the slider had been overwritten). NOT reproduced; the changes below remove the
+gaps the report can have fallen into. Nothing of this was built or run when it
+was written (no Windows toolchain in that session): build and test in the lab
+before release.
+
+Engine Fixes, read from its source (master, 7.0.21,
+`src/patches/save_added_sound_categories.cpp`, `src/main.cpp`): at
+`kDataLoaded` it calls `SetCategoryVolume` for every category that has an
+entry in `Data/SKSE/Plugins/EngineFixes_SNCT.ini` (section = plugin file, key
+= local FormID as 8 hex digits); it saves `volumeMult` of every category with
+the menu flag, Vanilla ones included, whenever
+`INIPrefSettingCollection::Unlock` runs. Consequences for the old design:
+
+- Engine-slot categories were left to the engine's restore, so a stale
+  Engine Fixes entry (or a SkyrimPrefs.ini that is not saved) won over the
+  value the plugin had written.
+- While the global multiplier is active, a root that is also a menu slider
+  holds baseline x global in `volumeMult`; Engine Fixes saves that scaled
+  value. If our `GlobalMultiplier` is then missing, the root stays scaled
+  (matches the three roots at 0.2 in the log, though 20% can also be the
+  user's own setting).
+
+Changes:
+
+- The store (`[Volumes]`) is applied to EVERY slider at startup, in the task
+  one frame after `kDataLoaded`, i.e. after Engine Fixes. Supersedes "Categories
+  in engine slots keep the engine's own restore" above. A restored engine-slot
+  category also gets its `uID<n>` / `fVal<n>` written, so the Vanilla menu
+  agrees.
+- Migration, once (`StoreOwnsAllVolumes` marker): older versions never
+  noticed Vanilla-menu changes, so for engine-slot categories a stored value
+  is trusted only where it equals the engine's `fVal<n>`; otherwise the
+  current value is taken over. A root that is also a menu slider (Word
+  Walls, SkyParkour) is compared against stored x `GlobalMultiplier` as well,
+  because the engine saves the scaled value on exit; when neither matches,
+  the current value divided by the multiplier becomes the baseline. Found in
+  the lab on 2026-11-24: without this, 0.8 at 50% came back as 0.4 and was
+  then halved again.
+- Changes made elsewhere are adopted: when the Journal Menu closes
+  (`MenuOpenCloseEvent`), every menu slider whose value differs from
+  `Entry::savedVolume` is written to the store. Extra Sliders are left out (a
+  mod may duck its own hidden category temporarily). A root menu category
+  changed in the Vanilla menu while the global multiplier is active is
+  recognised by `volumeMult` no longer being baseline x global; the value
+  divided by the multiplier becomes the new baseline (added 2026-11-24, lab
+  test with Papyrus `SetVolume` in place of the Vanilla slider).
+- Vanilla master: no slider, but `VanillaMaster` is stored (adopted at
+  Journal close, written by Reset All and the startup repair) and re-applied
+  at startup when it differs from `fAudioMasterVolume`. `masterVolume` equals
+  the setting value 1:1, confirmed in Ghidra on 1.6.1170 (2026-11-24): the
+  settings-menu handler @ 1409939b0 (case 0x1b) writes the slider value to
+  `masterVolume`, sends `VolumeChanged` (helper @ 140cb6c30) and stores the
+  same float in the setting; the audio init @ 1405d9a20 and the two reload
+  paths @ 140648b30 / 14064a400 copy the setting into `masterVolume`
+  unchanged; "defaults" @ 14064a060 sets both to 1.0. `ApplyVanillaMaster`
+  does the same three steps. Not heard in-game.
+- Every store write is read back. If the plugin INI does not take the value,
+  it goes to `<My Games>/SKSE/QuickAudioSliders.ini`; a key present there
+  wins on read and is removed once the plugin INI accepts a write again.
+- `PersistGlobal` also stores the baseline of roots that are menu sliders.
+- A slider that was moved but never reported "deactivated after edit" is
+  persisted on the next frame it is inactive, or when any menu closes
+  (`Entry::dirty`, `FlushDirty`).
+- Support: the previous log is kept as `QuickAudioSliders.prev.log` (one old
+  file only, by the user's decision: no pile of logs on users' disks);
+  startup logs the store paths with their line counts; the 150-odd "no stored
+  volume" lines became one summary line. Added 2026-11-25: the first line
+  carries the date (the other lines only the time), and startup says whether
+  Engine Fixes is loaded and how many values its `EngineFixes_SNCT.ini`
+  holds (`Engine Fixes: loaded; EngineFixes_SNCT.ini with 4 value(s)`), so a
+  "was X" in a `Restored` line can be traced to it. What to ask a user for:
+  both logs, the plugin INI (and the fallback under My Games/SKSE if it
+  exists), `[AudioMenu]` of SkyrimPrefs.ini and `EngineFixes_SNCT.ini`.
+
+Changes after the code review of 2026-11-25 (they supersede the matching
+points above):
+
+- Migration: the review suspected that taking over the live `volumeMult`
+  instead of `fVal<n>` lets a stale `EngineFixes_SNCT.ini` win. Not changed.
+  Lab run R1 (1.7.104, Engine Fixes, SNCT with Effects/Voice 0.2, prefs 1.0 /
+  0.8): Engine Fixes runs before us and its `SetCategoryVolume` fills
+  `fVal<n>` in memory too, so both hold the SNCT value at that point. And
+  that value is what the user heard under 1.0.2, which left the engine-slot
+  categories to the engine and Engine Fixes; taking it over keeps the sound.
+- The fallback file is one per Windows user, the plugin INI one per
+  installation. The fallback therefore keeps one section per installation,
+  `[Volumes.<FNV-1a of the plugin INI's real path, lower case>]`
+  (`GetFinalPathNameByHandle` on the plugin INI; the path the game sees when
+  that fails), with `PluginIni=<path>` for whoever reads the file. Other
+  sections are neither read nor changed. Limit: installations that share the
+  same real plugin INI (MO2 profiles of one instance, `overwrite/`) share the
+  section, as they share the plugin INI.
+- Adoption from the Vanilla menu no longer compares with `savedVolume` at
+  Journal close. `volumeMult` of every menu slider and the master setting are
+  noted when the Journal Menu opens; a timer thread queues a task four times
+  a second while it is open, and a value that moved since the last look is
+  stored. Reasons: (1) the game can be quit from the Journal without the
+  close event's task ever running; (2) a value another mod set before the
+  Journal opened (temporary Papyrus `SetVolume`) used to be stored for good.
+  `fVal<n>` cannot tell the two apart: `SetCategoryVolume` writes it for
+  every caller. Not a task that queues itself: SKSE empties the task queue in
+  one go. A mod changing a menu category while the Journal is open (an MCM
+  page lives in the Journal Menu) is still taken for the user. The poll also
+  checks `UI::IsMenuOpen("Journal Menu")` and switches the watch off when a
+  close event was missed.
+- A root menu category set above the global multiplier in the Vanilla menu
+  cannot be reached by any baseline (baseline <= 1). The baseline becomes 1.0
+  and the root is set to the multiplier when the Journal closes, so it sounds
+  the same before and after a restart; the log says "capped".
+
+Test list for the lab: fresh INI; INI from 1.0.2 with and without changes made
+in the Vanilla menu since; change in the Vanilla menu then restart; with and
+without Engine Fixes (stale `EngineFixes_SNCT.ini`); plugin INI read-only;
+global multiplier with a root menu category (SkyParkour, Word Walls); Vanilla
+master at 50% across a restart; Reset All.
+
+## Automatic weather sliders, second attempt (1.1.0, 2026-11-24)
+
+Requested again after the VSfW / Cathedral / Reverb reports ("can't this be
+dynamic instead of patched per mod"). The first prototype (2026-11-01) was
+dropped because every load order needed another rule. This one has a single
+rule and never touches a sound a mod already owns. Like the store rework it
+was NOT built or run when written.
+
+`PlanWeatherCategories` (after `PlanModCategories`, `[ModCategories]
+Weather=1`): collect every WTHR sound entry of type Precip / Thunder / Wind
+(SNDR, or SOUN -> SNDR); precipitation counts as Snow when the weather has the
+Snow flag and not the Rainy flag, the type with the most votes wins per
+descriptor. Then per descriptor:
+
+- category defined by a non-Vanilla plugin -> left alone, and the type is
+  marked "covered by a mod" (NAT, True Storms, VSfW and its patches);
+- engine-managed Vanilla category, `Exclude`d plugin, SRD-assigned -> left
+  alone;
+- otherwise (still on Ambience etc., Vanilla descriptors included) -> runtime
+  category per (type, parent), re-pointed like the per-mod categories. Label
+  "Rain (weather)", or "Rain (weather, other)" when a mod slider covers the
+  same type, plus the parent name when one type has several parents. Key
+  `weather:<Type>|<parent local FormID>`. Pseudo owner "Weather" gives the
+  group heading. A descriptor already planned into a "<Mod> (Ambience)"
+  category moves to the weather plan.
+
+Type "Default" entries are skipped (general ambience). Not found this way:
+`AMBWeatherRainInteriorLPSD` (no record references it) and any sound a mod
+plays by script. To check in the lab: Vanilla weathers only; NAT; True
+Storms; VSfW with and without patch; Cathedral + Unofficial Update; that
+re-pointing Vanilla descriptors off Ambience has no side effect (ducking,
+interior muffling).
+
+## "Now playing" view: what CommonLib shows (not implemented)
+
+Idea: a page listing the sounds playing right now with the slider that
+controls each, so "slider has no effect" reports answer themselves. From the
+CommonLibSSE-NG headers (commit 12d61f3):
+
+- `BSAudioManager::activeSounds` is a `BSTHashMap<uint32, BSGameSound*>`.
+- `BSGameSound` has `IsPlaying()`, `volume`, `resourceID` (file hash, no
+  name) and `QCategory()` -> `BSISoundCategory*`; `BGSSoundCategory` derives
+  from it, so the controlling slider is the first entry up the parent chain.
+- No back pointer to the descriptor form, so a row could show category, file
+  hash and volume, not an editor ID.
+
+Open and the reason it is not built: nothing in the headers says which thread
+owns `activeSounds` or which lock guards it (`ownerThread` / `ownerThreadID`
+suggest the audio thread). Iterating it from the render or game thread
+without that lock can crash. Needs Ghidra on 1.6.1170: find who inserts into
+/ erases from the map at +0x28 and under which lock, then decide.
+
+Ghidra, 1.6.1170, 2026-11-24 (decompiler plus a byte scan of the unpacked
+exe, because the project has no call xrefs): `BSAudioManagerThread::
+ThreadProc` @ 140cb6eb0 loops over the message pump @ 140cb3930 and the
+update @ 140cb5420. `activeSounds` is looked up in the message processor
+@ 140cb3b10, iterated in 140cb5420 / 140cb76d0 and erased from in 140cb0170
+(only caller: 140cb5420), all without any lock. The `BSReadWriteLock`
+@ 1431ca5d0 seen there guards `stateMap` (+0x58), the per-handle
+`BSSoundInfo` copy the update fills from `activeSounds`; the `BSSpinLock`
+@ 1431ca5d8 guards the message-queue swap. So `activeSounds` is owned by the
+audio thread and has no lock a plugin could take: do not iterate it from the
+game or render thread. Not established: the thread of two further call sites
+of the message processor (140caff5b, and the callback @ 140cb0400, which has
+no direct caller). A view would have to read `stateMap` under the read lock
+(no category in `BSSoundInfo` as far as the headers show) or hook the audio
+thread.
+
+### Built as "recently requested sounds" (2026-11-24)
+
+Page "Now Playing" (`src/NowPlaying.cpp`, `[NowPlaying] Enabled=1`). Instead
+of the audio manager's maps it hooks the descriptor: `BSAudioManager::
+GetSoundHandle` @ 140cb11a0 calls `descriptor->DoResolve(resolution)` before
+it creates the sound and posts `LoadForPlayback`, so a vtable hook on
+`BGSStandardSoundDef::DoResolve` (index 1, @ 140325cd0) sees every sound that
+is started through a descriptor, on the thread that asks for it. The hook
+calls the original and, on success, notes the descriptor under a mutex (at
+most 64 distinct descriptors, dropped two minutes after their last request).
+The page resolves name and plugin from an index built at `kDataLoaded` and
+finds the slider by walking the category's parents (`Audio::SliderFor`).
+
+- What stays listed (changed 2026-11-25 after the user tried it in game): a
+  looping sound is requested once and then plays on, so with a plain
+  two-minute limit the interior rain vanished while it was still heard. Now
+  a loop (`LengthCharacteristics::Looping::kLoop`) stays until the next
+  loading screen, a single sound for two minutes, and a loading screen
+  (`Loading Menu` opening) empties the whole list: what was requested in the
+  old place is of no interest in the new one. The page shows two sections,
+  "Loops" and "Single sounds". Limits: when a loop stops is not known, so a
+  listed one may be silent; a loop that plays on across a loading screen
+  without being requested again (suspected for the weather after fast
+  travel, not checked) is no longer listed. A real "is playing" needs the
+  sound's handle, which the descriptor hook does not see.
+- The table header gets a band in the theme's text colour; the framework's
+  themes leave `TableHeaderBg` transparent.
+- It records all the time, not only while the page is open: SKSE Menu
+  Framework freezes the game while its window is shown, and the sound one
+  asks about was heard before.
+- Not listed: sounds started by file (`GetSoundHandleByFile`, voice lines,
+  most music). Listed although possibly never audible: a handle that is
+  created and not played, and anything else that calls `DoResolve` (precache
+  was not checked).
+- Names are the editor IDs noted at load time (see below); a descriptor
+  without one shows as `<plugin>|<local FormID>`.
+- First hook into game code in this plugin. Run on 1.6.1170 and on 1.7.104
+  in a large load order (2026-11-24): the list fills, the slider column
+  shows "Effekte", "Fußstapfen", "Thunder (weather)", no crash in 25 game
+  starts with the hook installed; `Enabled=0` registers no page and no hook.
+  Not measured for cost.
+- Sound names: `GetFormEditorID()` returned nothing for sound descriptors,
+  on 1.7.104 even with Native EditorID Fix installed. Ghidra (1.6.1170):
+  `BGSSoundDescriptorForm::SetFormEditorID` @ 140324160 only files a hash of
+  the name in a map (@ 142010880) for `GetSoundHandleByName`; the string is
+  not kept. So the plugin hooks that function through the vtable (index
+  0x33) at plugin load and notes the names while the records load, then
+  copies them into the index at `kDataLoaded`. Result: 3297 of 3297
+  descriptors named on 1.6.1170, 3338 of 3338 on 1.7.104; the page shows
+  `AMBrWindForestPineGustB01`, `NPCDogBarkDistantSD`, `FSTPlayerDirtJumpDownSD`.
+  A plugin that hooks the same vtable slot is chained, not replaced.
+
+## After the lab report (2026-11-24, `docs/test-report-1.1.0.md`)
+
+Changed in reaction to the report, again without a build (written in the
+cloud session; rebuild before release):
+
+- A weather plan with a single descriptor is dropped when a mod already has a
+  slider for that type: NAT, True Storms and VSfW each left exactly one
+  thunder descriptor behind, which gave a "Thunder (weather, other)" slider
+  in every load order. The sound stays on its Vanilla slider and is logged.
+- Every weather slider logs its sounds with FormID, defining plugin and last
+  overriding plugin (`SourceFilesText`), so a report can be judged from the
+  log.
+- `ParentLabel` names `AudioCategoryAMB` (07F80B) "Ambience" instead of the
+  raw "AMB".
+
+Left as is, known from the report:
+
+- Two sliders for one type when its sounds hang on two Vanilla parents (rain
+  on Ambience and on Effects with Azurite): one runtime category has one
+  parent, and moving a sound to another parent would change its ducking.
+- A slider dragged while the mod menu closes is stored at the next game menu
+  event, not at once.
+- A root menu category with an engine slot is restored and mirrored on every
+  start while the global multiplier is active (the game saves the scaled
+  value on exit); the Vanilla menu shows the scaled value for it.
+- With a read-only plugin INI, "Cannot write" appears on every start (the
+  template wants to add a key).
+- Not run at all: a real slider in Settings > Audio, SkyParkour, a real
+  long-used 1.0.2 INI, and everything that needs ears.

@@ -248,6 +248,17 @@ namespace QAS::Translation
         g_strings.modsPageEmpty = Translate("$QAS_ModsPageEmpty", defaults.modsPageEmpty);
         g_strings.waiting = Translate("$QAS_Waiting", defaults.waiting);
         g_strings.noCategories = Translate("$QAS_NoCategories", defaults.noCategories);
+        g_strings.nowPlayingHint = Translate("$QAS_NowPlayingHint", defaults.nowPlayingHint);
+        g_strings.nowPlayingEmpty = Translate("$QAS_NowPlayingEmpty", defaults.nowPlayingEmpty);
+        g_strings.nowPlayingLimits = Translate("$QAS_NowPlayingLimits", defaults.nowPlayingLimits);
+        g_strings.colSound = Translate("$QAS_ColSound", defaults.colSound);
+        g_strings.colMod = Translate("$QAS_ColMod", defaults.colMod);
+        g_strings.colSlider = Translate("$QAS_ColSlider", defaults.colSlider);
+        g_strings.colAge = Translate("$QAS_ColAge", defaults.colAge);
+        g_strings.noSlider = Translate("$QAS_NoSlider", defaults.noSlider);
+        g_strings.extraPageTag = Translate("$QAS_ExtraPageTag", defaults.extraPageTag);
+        g_strings.sectionLoops = Translate("$QAS_SectionLoops", defaults.sectionLoops);
+        g_strings.sectionSingle = Translate("$QAS_SectionSingle", defaults.sectionSingle);
         logs::info("UI strings loaded ('{}' / '{}')", g_strings.resetAll, g_strings.otherMods);
     }
 

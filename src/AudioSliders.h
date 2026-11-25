@@ -27,7 +27,9 @@ namespace QAS::Audio
         std::string           persistKey;
         int                   slot{ -1 };  // [AudioMenu] fVal<slot> / uID<slot>; -1 = none (synthetic)
         float                 uiVolume{ 1.0F };  // last value the UI pushed (render thread)
+        float                 savedVolume{ 1.0F };  // value the plugin last stored or found at startup (game thread)
         std::atomic<bool>     pending{ false };  // a Preview() task is still queued
+        std::atomic<bool>     dirty{ false };    // previewed but not persisted yet
     };
 
     // Sliders grouped by the plugin that defines the category. The Vanilla
@@ -68,11 +70,16 @@ namespace QAS::Audio
     // Live apply on the game thread (same call path as the Vanilla slider).
     void Preview(std::size_t a_index, float a_volume);
 
-    // Write the entry's current volume: engine-slot categories to
-    // SkyrimPrefs.ini [AudioMenu], every category additionally to
-    // Data/SKSE/Plugins/QuickAudioSliders.ini (the only store for categories
-    // beyond the engine's eight slots; those are restored at kDataLoaded).
+    // Write the entry's current volume to the plugin's own store
+    // (Data/SKSE/Plugins/QuickAudioSliders.ini, see "Volume store" in
+    // AudioSliders.cpp): the store is the source of truth for every slider
+    // and is applied at kDataLoaded. Engine-slot categories are mirrored to
+    // SkyrimPrefs.ini [AudioMenu] so the Vanilla menu shows the same value.
     void Persist(std::size_t a_index);
+
+    // Persists every slider (and the global multiplier) that was previewed
+    // but never persisted, e.g. because the menu closed mid-drag.
+    void FlushDirty();
 
     // The value a slider has without any user override: the SNCT record's
     // UNAM "default menu value" (what the engine initialises volumeMult
@@ -94,4 +101,10 @@ namespace QAS::Audio
     [[nodiscard]] std::size_t RootCount();
     void                      SetGlobal(float a_multiplier);
     void                      PersistGlobal();
+    [[nodiscard]] bool        GlobalDirty();  // SetGlobal() without a PersistGlobal() yet
+
+    // The slider that controls a sound on a_category: the first slider up
+    // the parent chain. False when no slider is on the chain (the global
+    // slider still scales it through its root).
+    bool SliderFor(const RE::BGSSoundCategory* a_category, std::string& a_label, bool& a_extraPage);
 }
