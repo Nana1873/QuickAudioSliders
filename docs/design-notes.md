@@ -673,6 +673,42 @@ Changes:
   both logs, the plugin INI (and the fallback under My Games/SKSE if it
   exists), `[AudioMenu]` of SkyrimPrefs.ini and `EngineFixes_SNCT.ini`.
 
+Changes after the code review of 2026-11-25 (they supersede the matching
+points above):
+
+- Migration: the review suspected that taking over the live `volumeMult`
+  instead of `fVal<n>` lets a stale `EngineFixes_SNCT.ini` win. Not changed.
+  Lab run R1 (1.7.104, Engine Fixes, SNCT with Effects/Voice 0.2, prefs 1.0 /
+  0.8): Engine Fixes runs before us and its `SetCategoryVolume` fills
+  `fVal<n>` in memory too, so both hold the SNCT value at that point. And
+  that value is what the user heard under 1.0.2, which left the engine-slot
+  categories to the engine and Engine Fixes; taking it over keeps the sound.
+- The fallback file is one per Windows user, the plugin INI one per
+  installation. The fallback therefore keeps one section per installation,
+  `[Volumes.<FNV-1a of the plugin INI's real path, lower case>]`
+  (`GetFinalPathNameByHandle` on the plugin INI; the path the game sees when
+  that fails), with `PluginIni=<path>` for whoever reads the file. Other
+  sections are neither read nor changed. Limit: installations that share the
+  same real plugin INI (MO2 profiles of one instance, `overwrite/`) share the
+  section, as they share the plugin INI.
+- Adoption from the Vanilla menu no longer compares with `savedVolume` at
+  Journal close. `volumeMult` of every menu slider and the master setting are
+  noted when the Journal Menu opens; a timer thread queues a task four times
+  a second while it is open, and a value that moved since the last look is
+  stored. Reasons: (1) the game can be quit from the Journal without the
+  close event's task ever running; (2) a value another mod set before the
+  Journal opened (temporary Papyrus `SetVolume`) used to be stored for good.
+  `fVal<n>` cannot tell the two apart: `SetCategoryVolume` writes it for
+  every caller. Not a task that queues itself: SKSE empties the task queue in
+  one go. A mod changing a menu category while the Journal is open (an MCM
+  page lives in the Journal Menu) is still taken for the user. The poll also
+  checks `UI::IsMenuOpen("Journal Menu")` and switches the watch off when a
+  close event was missed.
+- A root menu category set above the global multiplier in the Vanilla menu
+  cannot be reached by any baseline (baseline <= 1). The baseline becomes 1.0
+  and the root is set to the multiplier when the Journal closes, so it sounds
+  the same before and after a restart; the log says "capped".
+
 Test list for the lab: fresh INI; INI from 1.0.2 with and without changes made
 in the Vanilla menu since; change in the Vanilla menu then restart; with and
 without Engine Fixes (stale `EngineFixes_SNCT.ini`); plugin INI read-only;

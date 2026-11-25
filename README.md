@@ -31,9 +31,16 @@ file name are not listed). No more Escape → Settings → Audio.
 - Each write is read back. If the plugin INI does not take a value (read-only
   file, virtual file system), it goes to
   `Documents/My Games/Skyrim Special Edition/SKSE/QuickAudioSliders.ini`
-  instead, and the log says so.
+  instead, and the log says so. That file is shared by all modlists of the
+  Windows user, so each installation has its own section there
+  (`[Volumes.<hash>]`, with the plugin INI it stands in for as `PluginIni=`).
 - A change made in the Vanilla Settings > Audio menu is taken into the plugin
-  INI when the Journal Menu closes, so it is not overwritten on the next start.
+  INI while the Journal Menu is open (checked four times a second, and when
+  it closes), so it is not overwritten on the next start, also when the game
+  is quit from that menu. Values other mods set outside the Journal
+  (Papyrus `SetVolume`) are not stored.
+- A root category (Word Walls, SkyParkour) set in the Vanilla menu above the
+  "All Sounds" multiplier is capped at the multiplier when the Journal closes.
 - The eight categories the engine keeps in `SkyrimPrefs.ini` `[AudioMenu]`
   (`fVal<n>` / `uID<n>`) are still written there as well, so the Vanilla menu
   shows the same values.

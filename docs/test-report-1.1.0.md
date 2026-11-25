@@ -30,6 +30,72 @@ Lab-Session, die den Branch zum ersten Mal gebaut und gestartet hat.
 „Bestanden" heißt: Das Log und die Dateien zeigen das beabsichtigte
 Verhalten. Es heißt nicht, dass es sich richtig anhört.
 
+## 00. Nachtrag: Änderungen nach dem Code-Review (2026-11-25)
+
+Ein Code-Review von PR 3 meldete fünf wichtige Befunde. Vier sind im Code
+geändert, einer hat sich im Test als kein Fehler erwiesen. Die übrigen Tests
+aus diesem Bericht liefen mit diesem Stand **nicht** noch einmal.
+
+| Befund | Änderung | Test | Status |
+| --- | --- | --- | --- |
+| Ersatzdatei gilt für alle Modlisten | eigener Abschnitt `[Volumes.<Hash>]` pro Installation | R2, R3 (1.7.104, schreibgeschützte INI, Ersatzdatei mit fremden Abschnitten vorbelegt) | bestanden |
+| Änderung im Vanilla-Menü geht beim Beenden aus dem Journal verloren | Prüfung viermal pro Sekunde, solange das Journal offen ist | R4, R5 (1.6.1170): Master per `setini`, Effekte per `SetVolume` bei offenem Journal | bestanden (nachgestellt und per Handtest mit dem echten Regler) |
+| Vorübergehende Werte anderer Mods werden gespeichert | nur was sich bei offenem Journal bewegt, wird übernommen | R5: `SetVolume` vor dem Öffnen und nach dem Schließen, Journal auf und zu | bestanden |
+| Wurzel-Regler über dem Multiplikator | wird beim Schließen des Journals auf den Multiplikator gekappt | R5: Word Walls auf 0.8 bei Multiplikator 0.5 | bestanden (Neustart danach nicht gelaufen) |
+| Migration übernimmt Live-Wert statt `fVal<n>` | keine (kein Fehler) | R1 (1.7.104, Engine Fixes, veraltete SNCT-Datei) | geklärt |
+
+Belege:
+
+- R2, Start: `Volume store: '...\GameRoot\Data\SKSE\Plugins\QuickAudioSliders.ini' (file 'e:\modlisten\skyrim\overwrite\skse\plugins\quickaudiosliders.ini') with 6 [Volumes] line(s); fallback '...\SKSE\QuickAudioSliders.ini' [Volumes.356CB652] not in use`,
+  obwohl die Ersatzdatei `[Volumes]` und `[Volumes.DEADBEEF]` mit
+  `StoreOwnsAllVolumes`, Effekte 0.11 / 0.22 und `GlobalMultiplier=0.3000`
+  enthielt. Die Migration lief trotzdem (`'Stimmen' ... stored 0.3300 predates SkyrimPrefs.ini, taking over the current 0.8000 (stored)`),
+  der Multiplikator blieb 1.0. Danach stand in der Datei zusätzlich
+  `[Volumes.356CB652]` mit `PluginIni=e:\modlisten\skyrim\overwrite\skse\plugins\quickaudiosliders.ini`,
+  `Skyrim.esm|0876BD=0.8000` und `StoreOwnsAllVolumes=1.0000`; die beiden
+  fremden Abschnitte waren unverändert.
+- R3, zweiter Start: `fallback '...' [Volumes.356CB652] with 2 line(s)`,
+  `5 slider(s) have a stored volume`.
+- Unter MO2 liefert `GetFinalPathNameByHandle` den echten Pfad in
+  `overwrite`, nicht den Pfad im Spielordner. Zwei MO2-Instanzen mit demselben
+  Spielordner werden damit unterschieden.
+- R4: Bei offenem Journal `setini "fAudioMasterVolume:AudioMenu" 0.6`:
+  innerhalb von zwei Sekunden `Adopted Vanilla master: 1.0000 -> 0.6000 (stored)`
+  und `VanillaMaster=0.6000` in der INI, während `Journal Menu` noch offen war.
+- R5 (Word Walls geladen, Multiplikator 0.5, Word Walls 0.8), alle Werte per
+  Papyrus `SetVolume` gesetzt, das Journal über DevBench geöffnet und per
+  Menüliste bestätigt:
+  - Musik auf 0.31 **vor** dem Öffnen, dann Journal auf: keine `Adopted`-Zeile.
+  - Effekte auf 0.55 bei offenem Journal: `Adopted 000172A1 'Effekte' key 'Skyrim.esm|0172A1': 1.0000 -> 0.5500, changed in the Vanilla menu (stored)`,
+    `Skyrim.esm|0172A1=0.5500` in der INI, Journal noch offen.
+  - Word Walls auf 0.8 bei offenem Journal: `Adopted FE0418A1 'Voiced Word Walls' key 'Voiced Word Walls.esp|0008A1': 0.8000 -> 1.0000, changed in the Vanilla menu (stored)`.
+    Nach dem Schließen: `FE0418A1 'Voiced Word Walls' was set to 0.8000, above the global multiplier 0.5000: capped at the multiplier`
+    und `Persisted fVal4:AudioMenu = 0.5000 via INIPrefSettingCollection`.
+  - Stimmen auf 0.22 **nach** dem Schließen, Journal noch einmal auf und zu:
+    keine `Adopted`-Zeile, kein Eintrag für Stimmen in `[Volumes]`.
+- Handtest des Nutzers mit diesem Stand (1.7.104, Engine Fixes, 2026-11-25):
+  in Einstellungen > Audio den Regler Effekte von 100 % heruntergezogen und
+  das Spiel bei offenem Audio-Menü mit `qqq` beendet. Log während des Ziehens:
+  `Adopted 000172A1 'Effekte' key 'Skyrim.esm|0172A1': 1.0000 -> 0.5500, changed in the Vanilla menu (stored)`,
+  dann `0.5500 -> 0.2000` und `0.2000 -> 0.1500`, jeweils rund 250 ms
+  auseinander. Danach stand `Skyrim.esm|0172A1=0.1500` in der Plugin-INI,
+  in `SkyrimPrefs.ini` aber weiter `fVal0=1.0000` (das Spiel hat den Wert nie
+  gesichert). Nach dem Neustart zeigten das Vanilla-Menü und das Plugin-Menü
+  15 % (Aussage des Nutzers). Bestanden; mit dem alten Mechanismus wäre der
+  Regler auf 100 % zurückgesprungen.
+- Nicht gelaufen: Beenden über System > Beenden > Desktop statt `qqq`.
+- Ein erster Versuch in R4, Effekte bei offenem Journal zu setzen, war
+  ungültig: Der Wert war derselbe wie davor, es gab nichts zu übernehmen.
+- R1: Engine Fixes läuft vor dem Plugin und sein `SetCategoryVolume` füllt
+  auch `fVal<n>` im Speicher. Beide Werte sind dann der aus
+  `EngineFixes_SNCT.ini` (`'Effekte' ... stored 1.0000 predates SkyrimPrefs.ini, taking over the current 0.2000`,
+  obwohl in `SkyrimPrefs.ini` 1.0 stand). Das ist der Wert, den man unter
+  1.0.2 gehört hat, weil 1.0.2 diese Kategorien der Engine und Engine Fixes
+  überließ. Die Migration bleibt deshalb, wie sie war.
+
+Ein Kleinkram-Befund (zwei nicht abgedeckte Wettersounds derselben Art unter
+verschiedenen Vanilla-Kategorien fallen beide weg) ist nicht geändert.
+
 ## 0. Gesamttest mit dem Stand `aac0e0d` (zweiter Durchlauf, 2026-11-24)
 
 Nach den Abschnitten 1 bis 5 kamen drei Commits dazu (`27ecf4e` Fixes für

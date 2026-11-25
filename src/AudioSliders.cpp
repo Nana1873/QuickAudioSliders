@@ -35,6 +35,9 @@ namespace
     // Second home of the volume store, used when the plugin INI cannot be
     // written (see "volume store" below): <My Games>/SKSE/QuickAudioSliders.ini.
     std::string                                     g_fallbackIniPath;
+    std::string                                     g_storeIdentity;    // real path of the plugin INI, lower case
+    std::string                                     g_fallbackSection;  // this installation's section in the fallback file
+    constexpr auto                                  kFallbackOwnerKey = "PluginIni";  // fallback section: path it stands in for
     bool                                            g_fallbackActive{ false };  // the fallback file holds values
     bool                                            g_fallbackWarned{ false };
     float                                           g_savedMaster{ -1.0F };  // Vanilla master as last stored / found; < 0 = unknown
@@ -924,6 +927,50 @@ namespace
     // logs, key by key: a key present in the fallback is newer than the same
     // key in the plugin INI, and is removed from the fallback as soon as the
     // plugin INI accepts a write for it again.
+    //
+    // The fallback file exists once per Windows user, the plugin INI once per
+    // installation (game folder, mod manager instance). So the fallback keeps
+    // one section per installation, "Volumes.<hash of the plugin INI's real
+    // path>": another modlist's fallback values are never read or replaced.
+
+    // The file behind the plugin INI as the file system knows it (under MO2
+    // the file in overwrite/ or a mod folder, where the API reports it),
+    // lower case. Falls back to the path the game sees.
+    std::string ResolveStoreIdentity()
+    {
+        std::string identity = g_pluginIniPath;
+        const HANDLE file = CreateFileA(g_pluginIniPath.c_str(), 0, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+            nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+        if (file != INVALID_HANDLE_VALUE) {
+            char       buffer[1024]{};
+            const auto length = GetFinalPathNameByHandleA(file, buffer, sizeof(buffer), FILE_NAME_NORMALIZED);
+            CloseHandle(file);
+            if (length > 0 && length < sizeof(buffer)) {
+                identity = buffer;
+                if (identity.starts_with(R"(\\?\)")) {
+                    identity.erase(0, 4);
+                }
+            }
+        }
+        if (!identity.empty()) {
+            CharLowerBuffA(identity.data(), static_cast<unsigned long>(identity.size()));
+        }
+        return identity;
+    }
+
+    std::string FallbackSectionFor(const std::string& a_identity)
+    {
+        std::uint32_t hash = 2166136261U;  // FNV-1a
+        for (const unsigned char c : a_identity) {
+            hash = (hash ^ c) * 16777619U;
+        }
+        return std::format("{}.{:08X}", kVolumesSection, hash);
+    }
+
+    const char* StoreSection(const std::string& a_path)
+    {
+        return !g_fallbackSection.empty() && a_path == g_fallbackIniPath ? g_fallbackSection.c_str() : kVolumesSection;
+    }
 
     std::string ReadStoreString(const std::string& a_path, const std::string& a_key)
     {
@@ -931,7 +978,7 @@ namespace
             return {};
         }
         char buffer[32]{};
-        GetPrivateProfileStringA(kVolumesSection, a_key.c_str(), "", buffer, sizeof(buffer), a_path.c_str());
+        GetPrivateProfileStringA(StoreSection(a_path), a_key.c_str(), "", buffer, sizeof(buffer), a_path.c_str());
         return buffer;
     }
 
@@ -969,12 +1016,12 @@ namespace
         if (a_path.empty() || a_key.empty()) {
             return false;
         }
-        const bool          written = WritePrivateProfileStringA(kVolumesSection, a_key.c_str(), a_text.c_str(), a_path.c_str()) != 0;
+        const bool          written = WritePrivateProfileStringA(StoreSection(a_path), a_key.c_str(), a_text.c_str(), a_path.c_str()) != 0;
         const unsigned long error = written ? 0UL : static_cast<unsigned long>(GetLastError());
         if (written && ReadStoreString(a_path, a_key) == a_text) {
             return true;
         }
-        logs::warn("[{}] {} = {} was not stored in '{}' ({})", kVolumesSection, a_key, a_text, a_path,
+        logs::warn("[{}] {} = {} was not stored in '{}' ({})", StoreSection(a_path), a_key, a_text, a_path,
             written ? "the value read back differs" : std::format("write failed, Windows error {}", error));
         return false;
     }
@@ -995,7 +1042,8 @@ namespace
             if (WriteStoreString(g_pluginIniPath, a_key, text)) {
                 if (g_fallbackActive) {
                     // The plugin INI holds the newest value again.
-                    WritePrivateProfileStringA(kVolumesSection, a_key.c_str(), nullptr, g_fallbackIniPath.c_str());
+                    WritePrivateProfileStringA(StoreSection(g_fallbackIniPath), a_key.c_str(), nullptr,
+                        g_fallbackIniPath.c_str());
                 }
                 return true;
             }
@@ -1005,8 +1053,11 @@ namespace
         }
         if (!g_fallbackWarned) {
             g_fallbackWarned = true;
-            logs::warn("The plugin INI '{}' does not accept values; storing them in '{}' instead", g_pluginIniPath,
-                g_fallbackIniPath);
+            logs::warn("The plugin INI '{}' does not accept values; storing them in '{}' [{}] instead", g_pluginIniPath,
+                g_fallbackIniPath, StoreSection(g_fallbackIniPath));
+            // For whoever reads the file: which installation the section is for.
+            WritePrivateProfileStringA(StoreSection(g_fallbackIniPath), kFallbackOwnerKey, g_storeIdentity.c_str(),
+                g_fallbackIniPath.c_str());
         }
         if (WriteStoreString(g_fallbackIniPath, a_key, text)) {
             g_fallbackActive = true;
@@ -1023,15 +1074,15 @@ namespace
             return 0;
         }
         std::vector<char> buffer(32767, '\0');
-        const auto        length = GetPrivateProfileSectionA(kVolumesSection, buffer.data(), static_cast<unsigned long>(buffer.size()),
-            a_path.c_str());
+        const auto        length = GetPrivateProfileSectionA(StoreSection(a_path), buffer.data(),
+            static_cast<unsigned long>(buffer.size()), a_path.c_str());
         std::size_t count = 0;
         for (std::size_t i = 0; i < length;) {
             const std::string_view line{ buffer.data() + i };
             if (line.empty()) {
                 break;
             }
-            ++count;
+            count += line.starts_with(kFallbackOwnerKey) ? 0 : 1;
             i += line.size() + 1;
         }
         return count;
@@ -1732,92 +1783,151 @@ namespace
         return !a_entry.synthetic && a_entry.slot >= 0 && a_entry.slot < g_engineSlots;
     }
 
-    // Game thread. A menu slider (or the Vanilla master) that no longer has
-    // the value the plugin stored was changed somewhere else, in practice in
-    // Settings > Audio: take the new value into the store, otherwise the next
-    // start would put the old one back. Called when the Journal Menu closes.
-    // "Extra Sliders" are left out: nothing but this plugin offers them, and a
-    // mod may duck its own hidden category temporarily.
-    void AdoptExternalChanges()
+    // What the menu sliders and the Vanilla master held when the Journal Menu
+    // opened, or at the last look since (game thread). Only a value that
+    // moves while the Journal is open was changed in Settings > Audio; a
+    // value another mod set before (a temporary Papyrus SetVolume) is not
+    // the user's setting and stays out of the store.
+    std::atomic<bool>  g_journalOpen{ false };
+    std::vector<float> g_journalSeen;    // raw volumeMult per entry
+    std::vector<bool>  g_journalCapped;  // root set above the global multiplier: cap it when the Journal closes
+    float              g_journalMaster{ -1.0F };
+
+    // Game thread, when the Journal Menu opens.
+    void JournalOpened()
     {
-        if (!g_ready.load()) {
+        g_journalSeen.assign(g_entries.size(), 0.0F);
+        g_journalCapped.assign(g_entries.size(), false);
+        for (std::size_t index = 0; index < g_entries.size(); ++index) {
+            g_journalSeen[index] = g_entries[index]->category->volumeMult;
+        }
+        const auto* setting = FindPref(kMasterSetting);
+        g_journalMaster = setting ? Clamp01(setting->data.f) : -1.0F;
+        g_journalOpen.store(true);
+    }
+
+    // Game thread. A menu slider (or the Vanilla master) that moved while the
+    // Journal Menu is open was changed in Settings > Audio: take the new
+    // value into the store, otherwise the next start would put the old one
+    // back. Runs a few times a second while the Journal is open (the game
+    // can be quit from there without the menu ever closing) and once more
+    // when it closes. "Extra Sliders" are left out: nothing but this plugin
+    // offers them.
+    void AdoptJournalChanges(bool a_closing)
+    {
+        if (!g_ready.load() || !g_journalOpen.load() || g_journalSeen.size() != g_entries.size()) {
+            return;
+        }
+        // A close event that never arrived must not leave the watch on:
+        // from then on other mods' changes would be stored again.
+        if (auto* ui = RE::UI::GetSingleton(); !a_closing && ui && !ui->IsMenuOpen(RE::JournalMenu::MENU_NAME)) {
+            g_journalOpen.store(false);
             return;
         }
         std::size_t adopted = 0;
-        for (auto& entryPtr : g_entries) {
-            auto& entry = *entryPtr;
+        for (std::size_t index = 0; index < g_entries.size(); ++index) {
+            auto& entry = *g_entries[index];
             if (entry.synthetic || entry.pending.load() || entry.dirty.load()) {
                 continue;
             }
-            float current = QAS::Audio::ReadVolume(entry);
-            // A root that is also a menu slider holds baseline x global while
-            // the multiplier is active, and ReadVolume() answers with the
-            // baseline. The Vanilla menu sets volumeMult directly: when it no
-            // longer equals baseline x global, the value divided by the
-            // multiplier is the new baseline. Not while the global slider is
-            // being dragged: g_global is then ahead of what was applied.
-            if (auto* root = FindRoot(entry.category);
-                root && g_globalActive.load(std::memory_order_relaxed) && !g_globalDirty.load()) {
-                const float global = g_global.load();
-                const float actual = Clamp01(entry.category->volumeMult);
-                const float baseline = root->baseline.load(std::memory_order_relaxed);
-                if (global > kVolumeEpsilon && std::abs(actual - Clamp01(baseline * global)) > kVolumeEpsilon) {
-                    current = Clamp01(actual / global);
+            const float raw = entry.category->volumeMult;
+            if (const float seenBefore = g_journalSeen[index]; std::abs(raw - seenBefore) > kVolumeEpsilon) {
+                g_journalSeen[index] = raw;
+                float current = Clamp01(raw);
+                // A root that is also a menu slider holds baseline x global
+                // while the multiplier is active. The Vanilla menu sets
+                // volumeMult directly: the value divided by the multiplier
+                // is the new baseline. Not while the global slider is being
+                // dragged: g_global is then ahead of what was applied.
+                if (auto* root = FindRoot(entry.category); root && g_globalActive.load(std::memory_order_relaxed)) {
+                    const float global = g_global.load();
+                    if (g_globalDirty.load() || global <= kVolumeEpsilon) {
+                        g_journalSeen[index] = seenBefore;  // look again next time
+                        continue;
+                    }
+                    current = Clamp01(raw / global);
                     root->baseline.store(current, std::memory_order_relaxed);
+                    // Above the multiplier no baseline reaches the value: the
+                    // root is capped at the multiplier when the Journal closes.
+                    g_journalCapped[index] = raw > global + kVolumeEpsilon;
+                }
+                if (std::abs(current - entry.savedVolume) > kVolumeEpsilon) {
+                    if (const auto key = PluginIniKey(entry); !key.empty()) {
+                        const bool ok = WritePluginVolume(key, current);
+                        logs::info("Adopted {:08X} '{}' key '{}': {:.4f} -> {:.4f}, changed in the Vanilla menu ({})",
+                            entry.formID, entry.label, key, entry.savedVolume, current, ok ? "stored" : "NOT STORED");
+                        entry.savedVolume = current;
+                        entry.uiVolume = current;
+                        ++adopted;
+                    }
                 }
             }
-            if (std::abs(current - entry.savedVolume) <= kVolumeEpsilon) {
-                continue;
+            if (a_closing && g_journalCapped[index]) {
+                // Apply the cap now, so it sounds the same before and after
+                // the next start.
+                const float global = g_global.load();
+                logs::info("{:08X} '{}' was set to {:.4f}, above the global multiplier {:.4f}: capped at the multiplier",
+                    entry.formID, entry.label, raw, global);
+                ApplyNow(entry, 1.0F);
+                if (HasEngineSlot(entry)) {
+                    WriteFloatPref(std::format("fVal{}", entry.slot), entry.category->volumeMult);
+                }
+                g_journalCapped[index] = false;
             }
-            const auto key = PluginIniKey(entry);
-            if (key.empty()) {
-                continue;
-            }
-            const bool ok = WritePluginVolume(key, current);
-            logs::info("Adopted {:08X} '{}' key '{}': {:.4f} -> {:.4f}, changed outside this plugin ({})", entry.formID,
-                entry.label, key, entry.savedVolume, current, ok ? "stored" : "NOT STORED");
-            entry.savedVolume = current;
-            entry.uiVolume = current;
-            ++adopted;
         }
         if (const auto* setting = FindPref(kMasterSetting)) {
             const float master = Clamp01(setting->data.f);
-            if (g_savedMaster < 0.0F || std::abs(master - g_savedMaster) > kVolumeEpsilon) {
-                const bool ok = WritePluginVolume(kVanillaMasterKey, master);
-                logs::info("Adopted Vanilla master: {:.4f} -> {:.4f} ({})", g_savedMaster, master, ok ? "stored" : "NOT STORED");
-                g_savedMaster = master;
-                ++adopted;
+            if (g_journalMaster < 0.0F || std::abs(master - g_journalMaster) > kVolumeEpsilon) {
+                g_journalMaster = master;
+                if (g_savedMaster < 0.0F || std::abs(master - g_savedMaster) > kVolumeEpsilon) {
+                    const bool ok = WritePluginVolume(kVanillaMasterKey, master);
+                    logs::info("Adopted Vanilla master: {:.4f} -> {:.4f} ({})", g_savedMaster, master,
+                        ok ? "stored" : "NOT STORED");
+                    g_savedMaster = master;
+                    ++adopted;
+                }
             }
         }
         if (adopted > 0) {
-            logs::info("{} value(s) changed outside this plugin taken into the volume store", adopted);
+            logs::info("{} value(s) changed in the Vanilla menu taken into the volume store", adopted);
+        }
+        if (a_closing) {
+            g_journalOpen.store(false);
         }
     }
 
     // Any menu closing stores sliders that were moved but never persisted;
-    // the Journal Menu (Settings > Audio) closing also adopts what the
-    // Vanilla menu changed.
+    // the Journal Menu (Settings > Audio) is watched for what the Vanilla
+    // menu changes.
     class MenuCloseSink final : public RE::BSTEventSink<RE::MenuOpenCloseEvent>
     {
     public:
         RE::BSEventNotifyControl ProcessEvent(const RE::MenuOpenCloseEvent* a_event,
             RE::BSTEventSource<RE::MenuOpenCloseEvent>*) override
         {
-            if (a_event && !a_event->opening && g_ready.load()) {
+            if (a_event && g_ready.load()) {
                 const char* name = a_event->menuName.c_str();
                 const bool  journal = name && std::string_view{ name } == "Journal Menu"sv;
-                if (auto* tasks = SKSE::GetTaskInterface()) {
-                    tasks->AddTask([journal]() {
-                        QAS::Audio::FlushDirty();
-                        if (!journal) {
-                            return;
-                        }
-                        // Queued behind the persist tasks FlushDirty() added.
-                        if (auto* later = SKSE::GetTaskInterface()) {
-                            later->AddTask([]() { AdoptExternalChanges(); });
-                        }
-                    });
+                auto*       tasks = SKSE::GetTaskInterface();
+                if (!tasks) {
+                    return RE::BSEventNotifyControl::kContinue;
                 }
+                if (a_event->opening) {
+                    if (journal) {
+                        tasks->AddTask([]() { JournalOpened(); });
+                    }
+                    return RE::BSEventNotifyControl::kContinue;
+                }
+                tasks->AddTask([journal]() {
+                    QAS::Audio::FlushDirty();
+                    if (!journal) {
+                        return;
+                    }
+                    // Queued behind the persist tasks FlushDirty() added.
+                    if (auto* later = SKSE::GetTaskInterface()) {
+                        later->AddTask([]() { AdoptJournalChanges(true); });
+                    }
+                });
             }
             return RE::BSEventNotifyControl::kContinue;
         }
@@ -1833,6 +1943,20 @@ namespace
         if (auto* ui = RE::UI::GetSingleton()) {
             ui->AddEventSink<RE::MenuOpenCloseEvent>(&sink);
             registered = true;
+            // Looks at the sliders four times a second while the Journal is
+            // open. A timer thread, not a task that queues itself: the task
+            // queue is emptied in one go.
+            std::thread([]() {
+                for (;;) {
+                    std::this_thread::sleep_for(std::chrono::milliseconds(250));
+                    if (!g_journalOpen.load()) {
+                        continue;
+                    }
+                    if (auto* tasks = SKSE::GetTaskInterface()) {
+                        tasks->AddTask([]() { AdoptJournalChanges(false); });
+                    }
+                }
+            }).detach();
         } else {
             logs::warn("UI singleton unavailable; changes made in the Vanilla audio menu are not taken into the store");
         }
@@ -1890,13 +2014,18 @@ namespace QAS::Audio
         EnsurePluginIni();
         g_fallbackIniPath.clear();
         g_fallbackActive = false;
+        g_storeIdentity = ResolveStoreIdentity();
+        g_fallbackSection = FallbackSectionFor(g_storeIdentity);
         if (auto logDir = SKSE::log::log_directory()) {
             std::error_code ec;
             g_fallbackIniPath = (*logDir / "QuickAudioSliders.ini").string();
-            g_fallbackActive = std::filesystem::exists(std::filesystem::path(g_fallbackIniPath), ec);
+            // Only this installation's section counts: the file is shared by
+            // every modlist of this Windows user.
+            g_fallbackActive = std::filesystem::exists(std::filesystem::path(g_fallbackIniPath), ec) &&
+                               CountStoreValues(g_fallbackIniPath) > 0;
         }
-        logs::info("Volume store: '{}' with {} [Volumes] line(s); fallback '{}' {}", g_pluginIniPath,
-            CountStoreValues(g_pluginIniPath), g_fallbackIniPath,
+        logs::info("Volume store: '{}' (file '{}') with {} [Volumes] line(s); fallback '{}' [{}] {}", g_pluginIniPath,
+            g_storeIdentity, CountStoreValues(g_pluginIniPath), g_fallbackIniPath, g_fallbackSection,
             g_fallbackActive ? std::format("with {} line(s)", CountStoreValues(g_fallbackIniPath)) : "not in use"s);
         // For support: Engine Fixes restores sound category volumes from its
         // own file at kDataLoaded, before the store is applied. Whether it is
@@ -2021,12 +2150,23 @@ namespace QAS::Audio
                     // Changed in the Vanilla menu since. For a scaled root the
                     // current value includes the multiplier: take it out, the
                     // multiplier is applied again below.
-                    const float adopted = scaledRoot ? Clamp01(current / scale) : current;
+                    // With Engine Fixes the current value is the one from its
+                    // EngineFixes_SNCT.ini (it ran before us and its
+                    // SetCategoryVolume also filled fVal<n> in memory). That
+                    // is what the user heard under the old version, which
+                    // left these categories to the engine and Engine Fixes.
+                    const float found = current;
+                    const float adopted = scaledRoot ? Clamp01(found / scale) : found;
                     const bool  ok = WritePluginVolume(key, adopted);
+                    if (scaledRoot && found > scale + kVolumeEpsilon) {
+                        logs::info("Category {:08X} '{}': {:.4f} is above the global multiplier {:.4f}; it is capped at "
+                                   "the multiplier",
+                            entry.formID, entry.label, found, scale);
+                    }
                     logs::info("Category {:08X} '{}' (slot {}) key '{}': stored {:.4f} predates SkyrimPrefs.ini, "
                                "taking over the current {:.4f}{} ({})",
                         entry.formID, entry.label, entry.slot, key, *stored, adopted,
-                        scaledRoot ? std::format(" (found {:.4f} with the global multiplier {:.4f})", current, scale) : ""s,
+                        scaledRoot ? std::format(" (found {:.4f} with the global multiplier {:.4f})", found, scale) : ""s,
                         ok ? "stored" : "NOT STORED");
                     if (scaledRoot) {
                         entry.uiVolume = adopted;
