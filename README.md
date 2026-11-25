@@ -1,7 +1,6 @@
 # Quick Audio Sliders
 
-**Version 1.1.0** (not released yet; the latest Nexus download is 1.0.2.
-1.0.3 was never released separately and is part of 1.1.0)
+**Version 1.1.0** (includes 1.0.3, which was never released separately)
 
 SKSE plugin for Skyrim SE/AE: an in-game volume panel rendered through
 [SKSE Menu Framework](https://www.nexusmods.com/skyrimspecialedition/mods/120352).
@@ -134,8 +133,8 @@ or keep single mods off the page with `Exclude=Some Mod.esp,Other.esp`.
 
 `tools\package.ps1` builds `dist\QuickAudioSliders-<version>.zip` from the
 built DLL (`SKSE/Plugins/`, no `.pdb`) and the translation files
-(`Interface/Translations/`). The Nexus page text lives in
-`docs/nexus-page.md`.
+(`Interface/Translations/`). The Nexus page text is kept locally in
+`docs/nexus-page.md` and is not part of the repository.
 
 ## License
 
