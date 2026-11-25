@@ -26,9 +26,11 @@ namespace QAS::NowPlaying
         bool          extraPage{ false };  // that slider is on the "Extra Sliders" page
         float         secondsAgo{ 0.0F };
         std::uint32_t count{ 0 };    // requests while it was listed
+        bool          loop{ false };  // looping sound: listed until the next loading screen, may have stopped since
     };
 
-    // Render thread. Newest first; sounds leave the list two minutes after
-    // their last request.
+    // Render thread. Loops first, then newest first. A one-shot leaves the
+    // list two minutes after its last request; a loop stays until the next
+    // loading screen.
     [[nodiscard]] std::vector<Row> Snapshot();
 }

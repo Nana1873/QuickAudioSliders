@@ -257,6 +257,8 @@ namespace QAS::Translation
         g_strings.colAge = Translate("$QAS_ColAge", defaults.colAge);
         g_strings.noSlider = Translate("$QAS_NoSlider", defaults.noSlider);
         g_strings.extraPageTag = Translate("$QAS_ExtraPageTag", defaults.extraPageTag);
+        g_strings.sectionLoops = Translate("$QAS_SectionLoops", defaults.sectionLoops);
+        g_strings.sectionSingle = Translate("$QAS_SectionSingle", defaults.sectionSingle);
         logs::info("UI strings loaded ('{}' / '{}')", g_strings.resetAll, g_strings.otherMods);
     }
 

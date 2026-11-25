@@ -10,9 +10,10 @@ as a slider, grouped by the mod that owns each category; page
 **"Extra Sliders"** adds automatic per-mod sliders for sound mods that route
 their sounds through vanilla categories and have no slider of their own
 (runtime-only categories, save-neutral); page **"Now Playing"** lists the
-sounds the game requested in the last two minutes with the slider that
-controls each (off with `[NowPlaying] Enabled=0`; voice lines and music
-started by file name are not listed). No more Escape → Settings → Audio.
+sounds the game requested since you entered the current place, loops first
+and single sounds from the last two minutes, with the slider that controls
+each (off with `[NowPlaying] Enabled=0`; voice lines and music started by
+file name are not listed). No more Escape → Settings → Audio.
 
 - Changes apply live through `BSISoundCategory::SetCategoryVolume` plus the
   engine's VolumeChanged broadcast, the same path the Vanilla slider uses;

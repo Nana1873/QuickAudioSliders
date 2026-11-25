@@ -39,15 +39,17 @@ namespace QAS::Translation
         std::string waiting = "Waiting for game data to load...";
         std::string noCategories = "No sound categories with a menu slider found in this load order.";
         // Page "Now Playing"
-        std::string nowPlayingHint = "Sounds the game requested in the last two minutes, newest first, and the slider that controls each.";
+        std::string nowPlayingHint = "Sounds the game requested since you entered this place, each with the slider that controls it: loops first, then single sounds from the last two minutes.";
         std::string nowPlayingEmpty = "No sound was requested in the last two minutes.";
-        std::string nowPlayingLimits = "Voice lines and music started by file name are not listed.";
+        std::string nowPlayingLimits = "A listed loop may have stopped since. Voice lines and music started by file name are not listed.";
         std::string colSound = "Sound";
         std::string colMod = "Mod";
         std::string colSlider = "Slider";
         std::string colAge = "Ago";
         std::string noSlider = "none (global only)";
         std::string extraPageTag = "Extra Sliders";
+        std::string sectionLoops = "Loops";
+        std::string sectionSingle = "Single sounds";
     };
 
     void           LoadStrings();

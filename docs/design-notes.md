@@ -753,6 +753,20 @@ most 64 distinct descriptors, dropped two minutes after their last request).
 The page resolves name and plugin from an index built at `kDataLoaded` and
 finds the slider by walking the category's parents (`Audio::SliderFor`).
 
+- What stays listed (changed 2026-11-25 after the user tried it in game): a
+  looping sound is requested once and then plays on, so with a plain
+  two-minute limit the interior rain vanished while it was still heard. Now
+  a loop (`LengthCharacteristics::Looping::kLoop`) stays until the next
+  loading screen, a single sound for two minutes, and a loading screen
+  (`Loading Menu` opening) empties the whole list: what was requested in the
+  old place is of no interest in the new one. The page shows two sections,
+  "Loops" and "Single sounds". Limits: when a loop stops is not known, so a
+  listed one may be silent; a loop that plays on across a loading screen
+  without being requested again (suspected for the weather after fast
+  travel, not checked) is no longer listed. A real "is playing" needs the
+  sound's handle, which the descriptor hook does not see.
+- The table header gets a band in the theme's text colour; the framework's
+  themes leave `TableHeaderBg` transparent.
 - It records all the time, not only while the page is open: SKSE Menu
   Framework freezes the game while its window is shown, and the sound one
   asks about was heard before.
