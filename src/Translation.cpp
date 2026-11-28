@@ -171,38 +171,20 @@ namespace
 
         // Then the translator's virtual Translate(),
         // exactly what Scaleform calls for "$Key" strings in menus. It
-        // covers the engine's own table (interface/translate_<lang>.txt),
-        // which is not necessarily visible in translationMap.
+        // covers the engine's own table (interface/translate_<lang>.txt).
+        //
+        // No raw BSScaleformTranslator::translationMap scan after this (1.1.0
+        // had one). Its find() crashed at kDataLoaded on a key slot holding
+        // UTF-16 text instead of a string-pool entry (Nexus CTD report
+        // 2026-11-27: SexLab $SSL_SFXVolume, ScaleformTranslationPP 1.8 and
+        // ~300 SKSE plugins; not reproduced in the lab with STPP 1.10). The
+        // kTranslator state need not be a stock BSScaleformTranslator, so
+        // its members are never read directly; the virtual call goes
+        // through whichever translator is installed (as in Notification
+        // Tweaks).
         if (std::string result; SKSE::Translation::Translate(std::string(a_key), result) && !result.empty() &&
                                 result != a_key) {
             return result;
-        }
-
-        const auto* manager = RE::BSScaleformManager::GetSingleton();
-        if (!manager || !manager->loader) {
-            return std::nullopt;
-        }
-        const auto translator = manager->loader->GetState<RE::BSScaleformTranslator>(RE::GFxState::StateType::kTranslator);
-        if (!translator) {
-            return std::nullopt;
-        }
-        const auto& map = translator->translator.translationMap;
-        // The engine's own table (interface/translate_<lang>.txt) and the
-        // SKSE-imported plugin files may key entries differently ("$Effects"
-        // vs "Effects"), so try the key as given and without its '$'.
-        for (const auto candidate : { a_key, a_key.substr(1) }) {
-            if (candidate.empty()) {
-                continue;
-            }
-            const RE::BSFixedStringW key{ QAS::Text::ToWide(candidate).c_str() };
-            const auto               it = map.find(key);
-            if (it == map.end()) {
-                continue;
-            }
-            const auto* wide = it->second.c_str();
-            if (auto translated = wide ? QAS::Text::ToUtf8(wide) : std::string{}; !translated.empty()) {
-                return translated;
-            }
         }
         return std::nullopt;
     }
