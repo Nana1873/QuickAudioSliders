@@ -1719,6 +1719,10 @@ namespace
             entry->editorID = std::format("(runtime: {})", plan.pluginFile);
             entry->label = label;
             entry->labelOverridden = true;  // already tidy; keep the mod name as is
+            if (!parentLabel.empty() && label.rfind(parentLabel) != std::string::npos) {
+                entry->labelParent = plan.parent;
+                entry->labelParentText = parentLabel;
+            }
             entry->synthetic = true;
             entry->ownerFileName = plan.pluginFile;
             // GetLocalFormID, not a mask: an ESL-defined parent's FE-prefixed
@@ -2376,6 +2380,25 @@ namespace QAS::Audio
                 entry->widgetID = std::format("{}##{:08X}", entry->label, entry->formID);
                 ++changed;
             }
+        }
+        // Runtime categories named after their parent ("<Mod> (Effects)"):
+        // after the pass above the parents carry their translated names.
+        for (auto& entry : g_entries) {
+            if (!entry->labelParent || entry->labelParentText.empty()) {
+                continue;
+            }
+            const auto parentLabel = ParentLabel(*entry->labelParent);
+            const auto at = entry->label.rfind(entry->labelParentText);
+            if (parentLabel.empty() || parentLabel == entry->labelParentText || at == std::string::npos) {
+                continue;
+            }
+            auto newLabel = entry->label;
+            newLabel.replace(at, entry->labelParentText.size(), parentLabel);
+            logs::info("Label for {:08X} re-translated: '{}' -> '{}'", entry->formID, entry->label, newLabel);
+            entry->label = std::move(newLabel);
+            entry->labelParentText = parentLabel;
+            entry->widgetID = std::format("{}##{:08X}", entry->label, entry->formID);
+            ++changed;
         }
         if (changed > 0) {
             logs::info("{} label(s) re-translated on first render", changed);

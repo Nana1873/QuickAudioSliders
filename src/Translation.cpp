@@ -18,6 +18,10 @@ namespace
     // (interned BSFixedStringW), and mod files rely on that.
     std::unordered_map<std::string, std::string> g_table;
 
+    // Set on the first menu render (EnableEngineLookup); before that the
+    // game's translator is not consulted at all.
+    std::atomic<bool> g_engineLookup{ false };
+
     std::string LowerKey(std::string_view a_key)
     {
         auto wide = QAS::Text::ToWide(a_key);
@@ -181,7 +185,11 @@ namespace
         // kTranslator state need not be a stock BSScaleformTranslator, so
         // its members are never read directly; the virtual call goes
         // through whichever translator is installed (as in Notification
-        // Tweaks).
+        // Tweaks). And not before the first menu render: at kDataLoaded the
+        // engine may still be building that table (see EnableEngineLookup).
+        if (!g_engineLookup.load()) {
+            return std::nullopt;
+        }
         if (std::string result; SKSE::Translation::Translate(std::string(a_key), result) && !result.empty() &&
                                 result != a_key) {
             return result;
@@ -199,6 +207,11 @@ namespace QAS::Translation
         if (!ParseFile(path) && language != "ENGLISH") {
             ParseFile(std::format("Interface\\Translations\\{}_ENGLISH.txt", a_name));
         }
+    }
+
+    void EnableEngineLookup()
+    {
+        g_engineLookup.store(true);
     }
 
     std::string Translate(std::string_view a_key, std::string_view a_fallback)
