@@ -74,11 +74,14 @@ namespace
             ImGuiMCP::TextDisabled("%s", strings.noCategories.c_str());
             return false;
         }
-        // Translation files imported after kDataLoaded are complete by the
-        // time the menu can be opened; retry the labels that missed once.
+        // The game's translation table is complete by the time the menu can
+        // be opened (and translation files imported after kDataLoaded are
+        // in): allow lookups through it from now on and retry the labels
+        // that missed once.
         static bool labelsRefreshed = false;
         if (!labelsRefreshed) {
             labelsRefreshed = true;
+            QAS::Translation::EnableEngineLookup();
             QAS::Audio::RefreshTranslatedLabels();
         }
         return true;

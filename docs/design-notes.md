@@ -864,3 +864,27 @@ Left as is, known from the report:
   template wants to add a key).
 - Not run at all: a real slider in Settings > Audio, SkyParkour, a real
   long-used 1.0.2 INI, and everything that needs ears.
+
+## Startup crash fix 2: no translator member reads, engine lookup deferred (2026-11-28)
+
+Nexus bug report (Timbles, 2026-11-27; AE 1.6.1170, ScaleformTranslationPP
+1.8, SexLab): access violation at kDataLoaded in `Translation.cpp` `Lookup`,
+`translationMap.find()` hit a key slot holding UTF-16 text
+(`test dword ptr [rdx+0x10]`, QuickAudioSliders.dll+0D2BCA in 1.1.0), while
+labelling SexLab's `$SSL_SFXVolume`. Reproduced in the AE-1.6.1170 instance
+with STPP 1.8 and a test ESL holding a menu category FULL
+`$QASTest_Untranslated`: same instruction and offset. Not reproduced with
+STPP 1.10 (1.1.0 passes there). STPP 1.8 installs its own translator, so the
+kTranslator state is not a BSScaleformTranslator and `translationMap` is
+foreign memory; the miss of both earlier lookup stages is what reaches it.
+
+Fixes: (1) `Lookup` no longer reads any translator member; it uses only our
+table and the translator's virtual `Translate()` (same shape as Notification
+Tweaks). (2) Until the first menu render (`Translation::EnableEngineLookup`
+in `BeginPage`) only our table is consulted, so nothing touches the engine's
+translation table at kDataLoaded; Vanilla `$` labels start English and are
+translated by the existing first-render retry, which now also swaps the
+parent name in runtime "<Mod> (<Parent>)" labels. Verified with STPP 1.8 and
+1.10: no crash, `$Effects` etc. re-translated to German on first render, the
+untranslated test key falls back to `QASTest_Untranslated`. Startup log lines
+show English labels now; group sort order is decided on those.

@@ -14,6 +14,13 @@ namespace QAS::Translation
     // a_fallback when given, else to the key without its leading '$'.
     std::string Translate(std::string_view a_key, std::string_view a_fallback = {});
 
+    // Until this is called, Translate consults only the plugin's own table
+    // and never the game's translator. kDataLoaded runs while the engine may
+    // still be building its translation table (InitTESThread); reading it
+    // then crashed 1.1.0 for one user. Called on the first render of the
+    // menu, right before the labels that missed are retried.
+    void EnableEngineLookup();
+
     // The plugin's own UI strings. English defaults live here; a
     // Data/Interface/Translations/QuickAudioSliders_<LANGUAGE>.txt file
     // overrides them (parsed by Import at kDataLoaded). Resolved once by

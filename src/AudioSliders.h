@@ -18,6 +18,11 @@ namespace QAS::Audio
         bool                  labelPendingTranslation{ false };
         std::string           labelModFile;  // mod file used for label cosmetics ("" = none)
         bool                  labelPooled{ false };  // label carries the pooled "Other Mods" form
+        // Runtime category whose label embeds its parent's name ("<Mod>
+        // (Effects)"): the parent and the name as embedded, so the retry can
+        // swap in the parent's translated name.
+        const RE::BGSSoundCategory* labelParent{ nullptr };
+        std::string                 labelParentText;
         // "Extra Sliders" entry (see [ModCategories]): a runtime-created
         // per-mod category, or a mod's own category without the menu flag.
         // No engine slot, persisted only in the plugin INI under persistKey,

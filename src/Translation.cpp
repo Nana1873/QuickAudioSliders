@@ -18,6 +18,10 @@ namespace
     // (interned BSFixedStringW), and mod files rely on that.
     std::unordered_map<std::string, std::string> g_table;
 
+    // Set on the first menu render (EnableEngineLookup); before that the
+    // game's translator is not consulted at all.
+    std::atomic<bool> g_engineLookup{ false };
+
     std::string LowerKey(std::string_view a_key)
     {
         auto wide = QAS::Text::ToWide(a_key);
@@ -171,38 +175,24 @@ namespace
 
         // Then the translator's virtual Translate(),
         // exactly what Scaleform calls for "$Key" strings in menus. It
-        // covers the engine's own table (interface/translate_<lang>.txt),
-        // which is not necessarily visible in translationMap.
+        // covers the engine's own table (interface/translate_<lang>.txt).
+        //
+        // No raw BSScaleformTranslator::translationMap scan after this (1.1.0
+        // had one). Its find() crashed at kDataLoaded on a key slot holding
+        // UTF-16 text instead of a string-pool entry (Nexus CTD report
+        // 2026-11-27: SexLab $SSL_SFXVolume, ScaleformTranslationPP 1.8 and
+        // ~300 SKSE plugins; not reproduced in the lab with STPP 1.10). The
+        // kTranslator state need not be a stock BSScaleformTranslator, so
+        // its members are never read directly; the virtual call goes
+        // through whichever translator is installed (as in Notification
+        // Tweaks). And not before the first menu render: at kDataLoaded the
+        // engine may still be building that table (see EnableEngineLookup).
+        if (!g_engineLookup.load()) {
+            return std::nullopt;
+        }
         if (std::string result; SKSE::Translation::Translate(std::string(a_key), result) && !result.empty() &&
                                 result != a_key) {
             return result;
-        }
-
-        const auto* manager = RE::BSScaleformManager::GetSingleton();
-        if (!manager || !manager->loader) {
-            return std::nullopt;
-        }
-        const auto translator = manager->loader->GetState<RE::BSScaleformTranslator>(RE::GFxState::StateType::kTranslator);
-        if (!translator) {
-            return std::nullopt;
-        }
-        const auto& map = translator->translator.translationMap;
-        // The engine's own table (interface/translate_<lang>.txt) and the
-        // SKSE-imported plugin files may key entries differently ("$Effects"
-        // vs "Effects"), so try the key as given and without its '$'.
-        for (const auto candidate : { a_key, a_key.substr(1) }) {
-            if (candidate.empty()) {
-                continue;
-            }
-            const RE::BSFixedStringW key{ QAS::Text::ToWide(candidate).c_str() };
-            const auto               it = map.find(key);
-            if (it == map.end()) {
-                continue;
-            }
-            const auto* wide = it->second.c_str();
-            if (auto translated = wide ? QAS::Text::ToUtf8(wide) : std::string{}; !translated.empty()) {
-                return translated;
-            }
         }
         return std::nullopt;
     }
@@ -217,6 +207,11 @@ namespace QAS::Translation
         if (!ParseFile(path) && language != "ENGLISH") {
             ParseFile(std::format("Interface\\Translations\\{}_ENGLISH.txt", a_name));
         }
+    }
+
+    void EnableEngineLookup()
+    {
+        g_engineLookup.store(true);
     }
 
     std::string Translate(std::string_view a_key, std::string_view a_fallback)
